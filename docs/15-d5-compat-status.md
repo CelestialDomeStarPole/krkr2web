@@ -178,7 +178,21 @@ System.getSystemLanguageTag。
    构造，即 UTF-8 → UTF-16）。
 
 此前担心的 TVPNormalizeStorageName 差异实际是字符串构造失败引发的级联错误，
-补上第 4 项后自动消解（测试中该符号来自 krkr2 的 StorageImpl.h，真实构建仍需
-对照 krkrsdl2 的 Storage 接口确认）。下一步是把 NCB + fstat 正式接入引擎构建，
-并验证 Plugins.link("fstat.dll") 能注册出 fstat 类。
+补上第 4 项后自动消解。
+
+### 链接分析（2026-08-14 更新）
+
+用 llvm-nm 对照 fstat.o / ncbind.o 的未定义符号与 krkrsdl2 引擎（.a 与 .wasm），
+得到精确缺口：TJS2 核心符号全部命中；引擎 TVP 符号大部分命中
+（TVPNormalizeStorageName、TVPGetLocalName、TVPGetPlacedPath、
+TVPGetTemporaryName、TVPExecuteExpression、TVPAddLog、TVPThrowExceptionMessage、
+TVPClearStorageCaches 等）；仅以下约 7 组文件/存储函数缺失，需写“存储兼容垫片”：
+
+- TVPGetAppStoragePath、TVP_stat、TVP_utime
+- TVPCopyFile、TVPDeleteFile、TVPCreateIStream
+- TVP_md5_init / TVP_md5_append / TVP_md5_finish
+
+这些在 Web 目标上都可垫（stat/复制/删除映射到现有 Storage，MD5 自实现，
+AppStoragePath 返回固定路径）。至此 fstat 移植的完整成本已收敛并量化：
+NCB 框架 + 字符串构造 + 日志桩 + 少量缺失 include + 上述存储垫片。
 
