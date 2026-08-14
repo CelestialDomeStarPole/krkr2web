@@ -185,13 +185,27 @@ layerExBtoA（wtnbgo，未克隆），且游戏在主循环中停止推进（XP3
 string to wide string”。已通过补丁 0031 把窄→宽转换宽容化（无效字节回退为
 逐字节 wide char），loadPIMG 异常解除。
 
-### 11. 主循环在跑但标题画面不渲染（当前主问题）
+### 11. 主循环在跑但标题画面不渲染（已定位到输入链路，部分解决）
 
 帧计数诊断确认主循环存活（约 8 FPS，90 秒 720 帧），XP3 读取全部完成、
-点击/键盘无响应、画布 54 色基本空白。游戏停在 boot 后的标题场景初始化：
-first.ks → first.init/first.logo syshook → title.ks（Override.tjs/exroll.tjs 链）。
-疑似依赖仍在 NOOP 的插件：extrans/extNagano（转场）、layerExDraw/Raster/BtoA
-（图层扩展）、AlphaMovie（logo 视频）。kag.setMessageHook（KAGParserEx）仍被捕获。
+画布基本空白。游戏已推进到 title.ks 的 `[s]`（等待输入）——KAG 流程
+first.ks → version.ks → title.ks 全部加载（KRKR2WEB_SCENARIO 诊断确认）。
+
+输入链路逐级诊断结论（2026-08-14）：
+
+1. 浏览器事件 → SDL：✅（KRKR2WEB_SDL_EV 1024/1025/1026 即
+   MOUSEMOTION/DOWN/UP 均到达）。
+2. **emscripten 输入断点（已修复）**：krkrsdl2 上游在 emscripten（非 pthreads）
+   下 `window_receive_event` 的 default 分支用 #if 排除了
+   `window_receive_event_input` 调用（依赖 SDL_AddEventWatch 的 watch 回调，
+   而该回调在本环境从不触发）→ 鼠标/键盘事件被静默丢弃。已通过补丁 0035
+   在 emscripten 下也走 input 路径。
+3. SDL → 窗口 → TVPPostEvent → TJS FuncCall：✅ 全链验证（ISVALID res=1、
+   TJSCALL_RET 0 即回调执行成功）。
+4. **当前残余**：游戏的 onMouseDown/onClick TJS 回调执行成功但 KAG 的 [s]
+   未推进（tag 日志停在 s）。FuncCall 存在个别 -1001（E_NOTIMPL，疑似
+   onHitTest 命中测试未实现）——游戏可能因点击命中测试失败而忽略输入。
+   下一轮验证 onHitTest 并决定是否实现 Layer 命中测试。
 
 ### 12. 剩余插件源已定位（kirikiroid2-web 全量）
 
@@ -200,6 +214,16 @@ PackinOne（补丁 0032，PackinOne 批量加载 8 子插件含这俩）。extra
 ripple/rotate/turn/wave）依赖 kirikiroid2-web 的 RenderManager（iTVPRenderManager/
 iTVPTexture2D），krkrsdl2 无此层（只有 Layer::OperateRect/tTVPBaseBitmap），需适配。
 layerex_draw/general 后端为 libgdiplus。extNagano 不在其中（游戏特有，待查）。
+
+## 构建流水线修复（2026-08-14）
+
+DSH 沙箱内发现 git.exe 的文件视图与其他进程隔离（git hash-object 对 11 字节
+文件算出 12 字节内容的哈希、git apply 对逐字节一致的上下文报不适用、写入
+不落真实磁盘）——git apply 全部“假成功”。已改为 **Python 补丁应用器**
+（`tools/apply_patch.py`，支持多文件/hunk 偏移搜索/空白容忍/CRLF/无
+diff --git 头的补丁），build_d3.ps1 打补丁阶段不再 git init。补丁 0034
+（KAG SCENARIO/LABEL 诊断）与 0035（emscripten 输入路径）已入列，全量
+重建（34 补丁）验证通过。
 
 ## 下一步
 
