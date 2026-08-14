@@ -133,10 +133,37 @@ System.getSystemLanguageTag。
 
 ## 下一步
 
-1. 提供 CSVParser 垫片并定位 kagenvironment.tjs initCommand 异常，让启动脚本
-   完成（出现“Startup script ended”）；
-2. 补齐 getLangName 等低成本 TJS 垫片；
-3. 按“标题 → 剧情 → 图层/立绘动画 → 声音 → 存读档 → 性能”顺序推进，端口
-   motionplayer（真实动画）、layerExImage/layerex_draw、textrender、psbfile 等
-   参考实现（参考 参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
-4. 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
+按 ADR-008 从 krkr2 真移植 NCB 框架与插件（不再手写 TJS 桩）：
+
+1. 打通 NCB 框架导入（补 include <set>、加 plugin 目录、构建集成）；
+2. 引入字符串转换层（detail::narrow / widen）与 spdlog 桩、Storage API 适配，
+   把 fstat 作为首个插件编译链接进引擎；
+3. 批量推进纯逻辑插件（fstat、json、csvParser、addFont、scriptsEx、shrinkCopy），
+   再视觉层插件（layerex_draw、layerExImage、textrender）；
+4. 最后啃重型逆向插件（motionplayer/Emote、psbfile、PackinOne，参考
+   参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
+5. 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
+
+## 插件移植摸底（ADR-008 验证）
+
+用 emcc 直接编译 krkr2 的 NCB 框架与 fstat 插件、对照 krkrsdl2 的 krkrz 引擎，
+实测得到可移植性结论：
+
+1. NCB 框架（ncbind.hpp / ncb_invoke.hpp / ncb_foreach.inc / ncbind.cpp）能直接
+   对 krkrsdl2 的 krkrz 编译，只需补一个缺失的 include <set>（libc++ 与 libstdc++
+   差异）。说明 TJS2 核心、ScriptMgnIntf、MsgIntf、DebugIntf、CharacterSet 等
+   引擎接口在两边基本同构，ADR-008 的“从 krkr2 移植”方向成立。
+2. 插件额外依赖 spdlog：krkr2 插件只用 spdlog::get + logger->warn/info 打诊断，
+   已用一个约 30 行的无 fmt 依赖 spdlog 桩满足（kirikiroid2-web 的 cmake/spdlog_stub
+   可作为参考）。
+3. fstat 实测编译暴露 9 处错误，可归类为三块适配：
+   - 缺失 include（<sstream> 等）——机械补；
+   - UTF-8 std::string 与 UTF-16 ttstr 互转（ttstr+std::string、ttstr(std::string)、
+     返回 std::string 到 ttstr）——krkr2 的 TJS2 字符串层支持、krkrsdl2 不支持，
+     需引入 detail::narrow / detail::widen 这类转换层（kirikiroid2-web 已有同款）；
+   - Storage API 差异（TVPNormalizeStorageName 等）——krkr2 的 StorageImpl.h 与
+     krkrsdl2 的 StorageImpl.h 不同，需按函数逐个适配或垫片。
+
+结论：NCB 框架近乎零成本可搬；每个插件仍需一层“字符串转换 + Storage API 适配”，
+这层适配是分摊成本，第一个插件（fstat）打通后即可复用。
+
