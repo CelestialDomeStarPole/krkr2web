@@ -20,9 +20,11 @@ Asyncify 桥对真实游戏资源是成立的。
 
 首个硬阻断（写压缩存档时 zlib deflate 的“null function”崩溃）已通过
 引擎补丁 0009 绕过：Web 构建下把 z 压缩模式降级为简单加密（mode 1），
-读写两端都从 0xfe 0xfe 头自动识别模式，本地存档自洽。补丁生效后游戏
-已跨过存档写入，进入 motionplayer（立绘动画）初始化，当前下一个阻断是
-motion.tjs 需要 Motion.ResourceManager 等类（详见“已知问题”）。
+读写两端都从 0xfe 0xfe 头自动识别模式，本地存档自洽。随后 motion.tjs 的
+阻断通过补丁 0010 的最小 Motion.ResourceManager 垫片跨过。游戏现在推进到
+csvParser（配置 CSV 解析）与 kagenvironment（KAG 命令初始化）两个新的
+可捕获异常，详见“已知问题”。整体说明 D0-D4 的读取/脚本/渲染管线对真实
+游戏资源持续成立，剩余工作集中在逐插件垫片与真实立绘/图层实现。
 
 ## 静态扫描结果
 
@@ -49,7 +51,7 @@ uipsd/langselect.ini（二进制 ini，非阻断）。
 
 | 插件 | 当前处理 | 说明 |
 | --- | --- | --- |
-| motionplayer.dll | bootstrap-only | 立绘动画（.mtn）；当前只打点不实现 |
+| motionplayer.dll | 最小垫片（补丁 0010） | 立绘动画（.mtn）；仅 ResourceManager 桩，真实动画未实现 |
 | menu.dll | TJS 垫片（补丁 0007） | 菜单类；游戏 fallback menubarhack 已走通 |
 | addfont.dll | TJS 垫片（补丁 0008） | 字体注册映射到 Font.addFont |
 | fstat.dll | no-op（优雅降级） | 存档改名；游戏 try/catch 后 disableFileRename=true |
@@ -97,16 +99,33 @@ ASYNCIFY_REMOVE 未消除）。若后续发现其他必须走 zlib deflate 的�
 回到根因：用 -sASYNCIFY_ONLY 只插桩真实的 IndexedDB 读取异步入口，避免
 全量插桩 zlib。
 
-### 2. motionplayer 缺失（当前硬阻断）
+### 2. motionplayer 缺失（部分垫片，仍缺真实动画）
 
-motion.tjs 中游戏执行 new Motion.ResourceManager(this, 20971520) 时，
-Motion.ResourceManager 为 void（motionplayer.dll 仅 bootstrap-only），抛出
-异常：An exception occured at motion.tjs(1)[(function) MotionResourceManager]。
-需要端口 motionplayer 插件（立绘动画，.mtn 资源 33 个），参考
-参考资料/开源项目/kirikiroid2-web/cpp/plugins/motionplayer/ 与
-参考资料/开源项目/krkr2/cpp/plugins/motionplayer/。
+motion.tjs 执行 new Motion.ResourceManager(this, 20971520) 时
+Motion.ResourceManager 为 void。已通过补丁 0010 提供最小
+KRKR2WebMotionResourceManager 类（isExistMotion 恒 false、findMotion/
+getMotion/loadMotion 返回 void、unload/clear 空实现），motion.tjs 初始化
+不再抛异常。但这只是垫片：真实立绘动画（.mtn 33 个）尚未实现，游戏后续
+调用 Motion.Player 播放动画时会走空路径。完整实现需端口
+参考资料/开源项目/kirikiroid2-web/cpp/plugins/motionplayer/（约 60 个源文件、
+含 EmoteEngine/Player 等完整动画引擎，工作量大）。
 
-### 3. getLangName.dll 缺失（非阻断）
+### 3. csvParser 缺失（当前阻断）
+
+utils.tjs 的 loadConfigFile 在解析 imagediffmap.csv 时 typeof CSVParser 为
+undefined，Plugins.link("csvParser.dll") 为 no-op 后读取全局 CSVParser 失败：
+An exception occured at utils.tjs(1)[(function) loadConfigFile]。需要提供
+CSVParser 全局（CSV 解析），该插件在 krkr2 / kirikiroid2-web 参考仓库中均无
+实现，需按游戏用法反向确定 API。
+
+### 4. kagenvironment.tjs initCommand 异常（当前阻断）
+
+kagenvironment.tjs 的 initCommand 在 Scripts.foreach(objects, ...) 处抛异常
+（An exception occured at kagenvironment.tjs(1)[(function) initCommand]），
+疑似与 KAGParserEx / scriptsEx 等 KAG 扩展插件缺失导致的命令/对象注册不全
+有关，需继续定位。
+
+### 5. getLangName.dll 缺失（非阻断）
 
 multilang.tjs 调用 System.getCurrentUILangName() 抛“成员不存在”，被游戏
 捕获并回落英语。需要时可用 TJS 垫片补齐 System.getCurrentUILangName /
@@ -114,10 +133,10 @@ System.getSystemLanguageTag。
 
 ## 下一步
 
-1. 端口 motionplayer 插件（立绘动画），让 Motion.ResourceManager / Motion.Player
-   可用，跨过 motion.tjs 初始化；
-2. 补齐 getLangName / csvParser 等低成本 TJS 垫片；
+1. 提供 CSVParser 垫片并定位 kagenvironment.tjs initCommand 异常，让启动脚本
+   完成（出现“Startup script ended”）；
+2. 补齐 getLangName 等低成本 TJS 垫片；
 3. 按“标题 → 剧情 → 图层/立绘动画 → 声音 → 存读档 → 性能”顺序推进，端口
-   layerExImage/layerex_draw、textrender、psbfile 等参考实现
-   （参考 参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
+   motionplayer（真实动画）、layerExImage/layerex_draw、textrender、psbfile 等
+   参考实现（参考 参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
 4. 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
