@@ -135,11 +135,12 @@ System.getSystemLanguageTag。
 
 按 ADR-008 从 krkr2 真移植 NCB 框架与插件（不再手写 TJS 桩）：
 
-1. 打通 NCB 框架导入（补 include <set>、加 plugin 目录、构建集成）；
-2. 引入字符串转换层（detail::narrow / widen）与 spdlog 桩、Storage API 适配，
-   把 fstat 作为首个插件编译链接进引擎；
-3. 批量推进纯逻辑插件（fstat、json、csvParser、addFont、scriptsEx、shrinkCopy），
-   再视觉层插件（layerex_draw、layerExImage、textrender）；
+1. ✅ NCB 框架 + 首个插件 fstat 已正式接入引擎并在真实游戏启动中注册成功
+   （Plugins.link("fstat.dll") 输出 KRKR2WEB_D5_PLUGIN_NCB）。补丁 0011-0017、
+   sourceImports NCBPlugins、engine/web 垫片已提交，链路已打通。
+2. 批量推进纯逻辑插件（json、csvParser、addFont、scriptsEx、shrinkCopy、
+   KAGParserEx、layerExBtoA 等），复用 fstat 的“导入 + 适配 + 注册”流程；
+3. 再视觉层插件（layerex_draw、layerExImage、textrender）；
 4. 最后啃重型逆向插件（motionplayer/Emote、psbfile、PackinOne，参考
    参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
 5. 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
