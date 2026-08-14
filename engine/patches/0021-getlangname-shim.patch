@@ -1,0 +1,16 @@
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -1211,3 +1211,12 @@
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM motionplayer.dll"));
+ 	}
++	else if(name == TJS_W("getLangName.dll"))
++	{
++		TVPExecuteScript(
++			TJS_W("if (typeof System.getCurrentUILangName == 'undefined') System.getCurrentUILangName = function() { return '日本語'; };")
++			TJS_W("if (typeof System.getCurrentUILangTag == 'undefined') System.getCurrentUILangTag = function() { return 'ja'; };")
++			TJS_W("if (typeof System.getCurrentLocale == 'undefined') System.getCurrentLocale = function() { return 'ja_JP'; };"),
++			TJS_W("krkr2web-getlangname-shim"), 0);
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM getLangName.dll"));
++	}
+ 	else if(name == TJS_W("csvParser.dll"))

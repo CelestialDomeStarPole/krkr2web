@@ -60,6 +60,14 @@
         {
           "source": "cpp/plugins/fstat/main.cpp",
           "target": "external/krkrz/plugin/fstat/main.cpp"
+        },
+        {
+          "source": "cpp/plugins/getSample.cpp",
+          "target": "external/krkrz/plugin/getSample.cpp"
+        },
+        {
+          "source": "cpp/plugins/scriptsEx.cpp",
+          "target": "external/krkrz/plugin/scriptsEx.cpp"
         }
       ]
     },
@@ -95,6 +103,8 @@
     "patches/0016-fstat-no-filesystem.patch",
     "patches/0017-whole-archive-plugins.patch",
     "patches/0018-csvparser-port.patch",
-    "patches/0019-csvparser-build-link.patch"
+    "patches/0019-csvparser-build-link.patch",
+    "patches/0020-ncb-plugins-getsample-scriptsex.patch",
+    "patches/0021-getlangname-shim.patch"
   ]
 }

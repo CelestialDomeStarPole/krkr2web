@@ -1,0 +1,10 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -171,4 +171,6 @@
+ 	external/krkrz/plugin/ncbind.cpp
+ 	external/krkrz/plugin/fstat/main.cpp
+ 	external/krkrz/plugin/csvParser/main.cpp
++	external/krkrz/plugin/getSample.cpp
++	external/krkrz/plugin/scriptsEx.cpp
+ 	external/krkrz/web/plugin_compat.cpp
