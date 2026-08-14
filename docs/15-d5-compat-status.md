@@ -159,11 +159,22 @@ loadImages("sqscrmask") 的异常实为 **PNG Read Error /Not a PNG file**：
 sqscrmask.png 实为 WebP。已接入 libwebp + WebP 加载器 + magic 探测路由
 （补丁 0024-0026），序列屏图像加载通过。
 
-### 8. psdlayer.tjs loadPIMG（当前阻断 → psbfile/PSB）
+### 8. psdlayer.tjs loadPIMG（已解决 → psbfile）
 
-loadPIMG 访问 PSBFile 成员抛“成员不存在”：quickmenu.PIMG 等 .pimg 文件实为
-PSB（Photoshop Big）。需移植 psbfile 插件（kirikiroid2-web/cpp/plugins/psbfile
-为 NCB 逆向版，krkr2/cpp/plugins/psdfile 为原始 wtnbgo 版），提供 PSBFile 类。
+已从 kirikiroid2-web 移植 psbfile 插件（PSBFile/PSBRawFile/PSBMedia，NCB），
+配套补丁：tTJSString 增加 IndexOf/SubString（补丁 0028）、iTVPStorageMedia
+补虚析构。PSBFile 类注册成功，loadPIMG 阻断解除。
+
+### 9. 启动脚本完整跑通 ✅（2026-08 里程碑）
+
+**“(info) Startup script ended.” 首次出现**——真实 startup.tjs → boot.tjs 全链
+跑通，游戏进入主循环。插件注册现状：fstat/csvParser/getSample/scriptsEx/psbfile
+真注册，motionplayer/menu/addFont/getLangName/windowEx 垫片，其余
+（textrender/layerEx*/KAGParserEx/savestruct/extrans/extNagano/PackinOne）仍 NOOP。
+
+画布目前仍为空白：标题画面渲染依赖视觉层插件（textrender/layerExImage/
+layerExDraw/layerExRaster/layerExBtoA），尚未移植。主循环中残留可捕获异常：
+savestruct.dll 的 save2（配置存档）、kag.setMessageHook（KAGParserEx，F10 键）。
 
 ## 下一步
 
