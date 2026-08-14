@@ -1,0 +1,33 @@
+diff --git a/external/krkrz/base/StorageIntf.h b/external/krkrz/base/StorageIntf.h
+--- a/external/krkrz/base/StorageIntf.h
++++ b/external/krkrz/base/StorageIntf.h
+@@ -108,3 +108,4 @@
+ public:
++	virtual ~iTVPStorageMedia() { ; }
+ 	virtual void TJS_INTF_METHOD AddRef() = 0;
+ 	virtual void TJS_INTF_METHOD Release() = 0;
+diff --git a/external/krkrz/tjs2/tjsString.h b/external/krkrz/tjs2/tjsString.h
+--- a/external/krkrz/tjs2/tjsString.h
++++ b/external/krkrz/tjs2/tjsString.h
+@@ -462,3 +462,21 @@
+ 	TJS_CONST_METHOD_DEF(tjs_int, length, ()) { return GetLen(); }
+ 
++	// krkr2web: IndexOf/SubString for krkr2/kirikiroid2-web plugin interop (psbfile uses these)
++	TJS_CONST_METHOD_DEF(int, IndexOf, (const tTJSString &str, unsigned int pos = 0))
++	{
++		if(!Ptr || !str.Ptr) return -1;
++		const tjs_char *p = TJS_strstr(c_str() + pos, str.c_str());
++		if(!p) return -1;
++		return (int)(p - c_str());
++	}
++
++	TJS_CONST_METHOD_DEF(tTJSString, SubString, (unsigned int pos, unsigned int len))
++	{
++		if(!Ptr || len == 0 || pos >= (unsigned int)GetLen()) return tTJSString();
++		tjs_int total = GetLen();
++		tjs_int remain = total - (tjs_int)pos;
++		tjs_int n = ((tjs_int)len < 0 || (tjs_int)len > remain) ? remain : (tjs_int)len;
++		if(n <= 0) return tTJSString();
++		return tTJSString(c_str() + pos, n);
++	}
+ 	TJS_CONST_METHOD_DEF(tjs_char, GetLastChar, ())

@@ -138,6 +138,15 @@ $webpConfig = @"
 "@
 Set-Content -LiteralPath (Join-Path $webpConfigDir "config.h") -Value $webpConfig -Encoding ASCII
 
+# krkr2web ADR-008: copy the psbfile plugin (PSB/PSD image decoding) from kirikiroid2-web.
+$psbSource = Join-Path $referenceProjects "kirikiroid2-web\cpp\plugins\psbfile"
+$psbTarget = Join-Path $source "external\krkrz\plugin\psbfile"
+if (Test-Path $psbSource) {
+    New-Item -ItemType Directory -Force $psbTarget | Out-Null
+    Copy-Item (Join-Path $psbSource "*.cpp") -Destination $psbTarget -Force
+    Copy-Item (Join-Path $psbSource "*.h") -Destination $psbTarget -Force
+}
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `
