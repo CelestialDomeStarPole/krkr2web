@@ -104,6 +104,13 @@ TBS 046295 无法注册 Service Worker，且该宿主断网后只要 URL 变化�
 Wasm 内存为 64 MiB，存档同步 3 次。测试者确认画面、声音和操作正常。D4 整体通过，
 退出 WebView 后的断网冷启动不属于产品范围。
 
+D5《千恋万花》兼容与性能开发已进入实质阶段：三个真实 XP3（约 4.04 GB）已能通过
+D5 兼容探针在本机无头 Chrome 启动，引擎完成索引读取、文件树重建（39,946 个文件）、
+真实 `startup.tjs`/`boot.tjs` 与全部系统脚本加载、字体加载，累计 848 MiB 读取无错误。
+当前首个硬阻断是写压缩存档时 zlib deflate 的 Asyncify 误改写触发 Wasm
+“null function”崩溃；插件缺口清单、精确崩溃栈与修复优先级见
+[D5 兼容与性能现状](docs/15-d5-compat-status.md)。
+
 ## 文档入口
 
 - [产品与技术文档总览](docs/README.md)
@@ -113,6 +120,7 @@ Wasm 内存为 64 MiB，存档同步 3 次。测试者确认画面、声音和�
 - [开发环境与可复现构建](docs/12-development-environment.md)
 - [上游基线与许可证审计](docs/13-upstream-license-audit.md)
 - [架构决策记录](docs/14-architecture-decisions.md)
+- [D5《千恋万花》兼容与性能现状](docs/15-d5-compat-status.md)
 - [WebView 实机检测工具](diagnostics/README.md)
 
 ## 当前仓库内容

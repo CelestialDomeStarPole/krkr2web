@@ -27,6 +27,7 @@
 - [12-开发环境与可复现构建](12-development-environment.md)
 - [13-上游基线与许可证审计](13-upstream-license-audit.md)
 - [14-架构决策记录](14-architecture-decisions.md)
+- [15-D5《千恋万花》兼容与性能现状](15-d5-compat-status.md)
 - [D2 游戏下载与缓存验证](../probes/d2-downloader/README.md)
 - [D3 KRKR2 引擎验证](../probes/d3-engine/README.md)
 
