@@ -147,6 +147,11 @@ if (Test-Path $psbSource) {
     Copy-Item (Join-Path $psbSource "*.h") -Destination $psbTarget -Force
 }
 
+# krkr2web ADR-008: copy the saveStruct plugin (adapted: no fmt, +StorageIntf/UtilStreams includes).
+$saveStructSource = Join-Path $projectRoot "engine\plugins\saveStruct.cpp"
+$saveStructTarget = Join-Path $source "external\krkrz\plugin\saveStruct.cpp"
+Copy-Item -LiteralPath $saveStructSource -Destination $saveStructTarget -Force
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `

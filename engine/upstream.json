@@ -112,6 +112,7 @@
     "patches/0025-libwebp-decode.patch",
     "patches/0026-webp-loader-router.patch",
     "patches/0027-psbfile-build.patch",
-    "patches/0028-tjsstring-indexof-substring.patch"
+    "patches/0028-tjsstring-indexof-substring.patch",
+    "patches/0029-savestruct-build.patch"
   ]
 }
