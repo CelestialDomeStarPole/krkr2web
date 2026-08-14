@@ -1,0 +1,46 @@
+diff --git a/external/krkrz/plugin/csvParser/main.cpp b/external/krkrz/plugin/csvParser/main.cpp
+--- a/external/krkrz/plugin/csvParser/main.cpp
++++ b/external/krkrz/plugin/csvParser/main.cpp
+@@ -3,4 +3,3 @@
+ #include <string>
+ 
+-typedef unsigned long ULONG;
+ 
+@@ -338,6 +337,7 @@
+ //---------------------------------------------------------------------------
+ 
+-#define TJS_NATIVE_CLASSID_NAME ClassID_CSVParser
+-static tjs_int32 TJS_NATIVE_CLASSID_NAME = -1;
++#undef TJS_NATIVE_SET_ClassID
++#define TJS_NATIVE_SET_ClassID ClassID_CSVParser = TJS_NCM_CLASSID;
++static tjs_int32 ClassID_CSVParser = -1;
+ 
+ /**
+@@ -565,3 +565,5 @@
+ 	tTJSNativeClassForPlugin * classobj = TJSCreateNativeClassForPlugin(TJS_W("CSVParser"), Create_NI_CSVParser);
+ 
++	#undef TJS_NCM_REG_THIS
++	#define TJS_NCM_REG_THIS classobj
+ 	TJS_BEGIN_NATIVE_MEMBERS(/*TJS class name*/CSVParser)
+@@ -662,4 +664,4 @@
+ 
+-#undef TJS_NATIVE_CLASSID_NAME
++#undef TJS_NATIVE_SET_ClassID
+ 
+ void csvparser_init() {
+@@ -681,8 +683,9 @@
+ 		addMember(global, TJS_W("CSVParser"), Create_NC_CSVParser());
+ 		global->Release();
+ 	}
+ }
+ 
++#if 0 // krkr2web: removed DLL export/import-stub machinery (V2Link/V2Unlink/static plugin entry)
+ //---------------------------------------------------------------------------
+ 
+ #ifdef TVP_STATIC_PLUGIN
+@@ -803,4 +806,5 @@
+ 	TVPRegisterPlugin(&plugin);
+ }
+ 
+ #endif
++#endif // krkr2web: end removed DLL export/import-stub machinery

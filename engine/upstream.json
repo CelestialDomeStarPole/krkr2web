@@ -62,6 +62,19 @@
           "target": "external/krkrz/plugin/fstat/main.cpp"
         }
       ]
+    },
+    {
+      "name": "csvParser",
+      "repository": "https://github.com/wtnbgo/csvParser.git",
+      "commit": "7c757cf4c98e0ad314a8bdcd1d78751da6045bbe",
+      "localCheckout": "参考资料/开源项目/csvParser",
+      "license": "readme.txt",
+      "files": [
+        {
+          "source": "main.cpp",
+          "target": "external/krkrz/plugin/csvParser/main.cpp"
+        }
+      ]
     }
   ],
   "patches": [
@@ -80,6 +93,8 @@
     "patches/0014-ncb-plugin-build.patch",
     "patches/0015-ncb-link-loadmodule.patch",
     "patches/0016-fstat-no-filesystem.patch",
-    "patches/0017-whole-archive-plugins.patch"
+    "patches/0017-whole-archive-plugins.patch",
+    "patches/0018-csvparser-port.patch",
+    "patches/0019-csvparser-build-link.patch"
   ]
 }

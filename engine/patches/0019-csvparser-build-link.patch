@@ -1,0 +1,27 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -170,4 +170,5 @@
+ list(APPEND KRKRSDL2COMMON_SRC
+ 	external/krkrz/plugin/ncbind.cpp
+ 	external/krkrz/plugin/fstat/main.cpp
++	external/krkrz/plugin/csvParser/main.cpp
+ 	external/krkrz/web/plugin_compat.cpp
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -19,3 +19,4 @@
+ #ifdef __EMSCRIPTEN__
+ #include "ncbind.hpp"
++extern void csvparser_init();
+ #endif
+@@ -1210,4 +1210,9 @@
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM motionplayer.dll"));
+ 	}
++	else if(name == TJS_W("csvParser.dll"))
++	{
++		csvparser_init();
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_TJS csvParser.dll"));
++	}
+ 	else
+ 	{
