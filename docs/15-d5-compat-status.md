@@ -26,6 +26,20 @@ csvParser（配置 CSV 解析）与 kagenvironment（KAG 命令初始化）两�
 可捕获异常，详见“已知问题”。整体说明 D0-D4 的读取/脚本/渲染管线对真实
 游戏资源持续成立，剩余工作集中在逐插件垫片与真实立绘/图层实现。
 
+### 图像格式重大发现（2026-08 更新）
+
+对 XP3 内图像采样发现：《千恋万花》几乎所有光栅图像都用 **WebP** 存储，
+只是保留了 .png/.jpg/.tlg 扩展名（76/80 .png、40/40 .jpg、40/40 .tlg 采样均为
+WebP，magic = RIFF...WEBPVP8）。另有：
+
+- `.pimg`（155 个）→ PSB（Photoshop Big，magic "PSB\0"），需 psbfile 插件；
+- `.sli`（9758 个）→ 自研分层图（magic "#2.0"），需 layerEx 系插件。
+
+因此 krkrsdl2 原生的 PNG/JPEG/TLG 加载器无法解码这些文件。已接入 **libwebp**
+（源码 `参考资料/开源项目/libwebp`，decode 子集 29 个 .c）+ 适配版 WebP 加载器
+（`engine/webp/LoadWEBP.cpp`）+ `TVPInternalLoadGraphic` 的 WebP magic 探测路由
+（补丁 0025-0026），.png/.jpg/.tlg 现已能按 magic 自动路由到 WebP 解码。
+
 ## 静态扫描结果
 
 tools/scan_xp3_compat.py 对三个 XP3 的扫描结果（39,951 个条目、7.34 MiB
@@ -139,12 +153,17 @@ keybinder.tjs 调用 kag.setMessageHook(true, num) 抛“成员不存在”，�
 KAGParserEx（wtnbgo）给 kag 对象加的 KAG 扩展，krkr2/kirikiroid2-web 参考仓库
 均无实现，需从 wtnbgo/KAGParserEx 克隆移植。
 
-### 7. Layer.loadImages 缺失（当前阻断，layerEx 图层扩展）
+### 7. sqscr.tjs loadImages（已解决 → WebP）
 
-sqscr.tjs 的 loadone 调用 layer.loadImages("sqscrmask") 抛“成员不存在”。
-loadImages 属于 wtnbgo 的 layerEx 系列图层扩展（kirikiroid2-web 的 layerExImage
-只覆盖 light/colorize/modulate/noise 等，未含 loadImages），需从
-wtnbgo/layerExImage（或 uyjulian/layerExImage）克隆移植。
+loadImages("sqscrmask") 的异常实为 **PNG Read Error /Not a PNG file**：
+sqscrmask.png 实为 WebP。已接入 libwebp + WebP 加载器 + magic 探测路由
+（补丁 0024-0026），序列屏图像加载通过。
+
+### 8. psdlayer.tjs loadPIMG（当前阻断 → psbfile/PSB）
+
+loadPIMG 访问 PSBFile 成员抛“成员不存在”：quickmenu.PIMG 等 .pimg 文件实为
+PSB（Photoshop Big）。需移植 psbfile 插件（kirikiroid2-web/cpp/plugins/psbfile
+为 NCB 逆向版，krkr2/cpp/plugins/psdfile 为原始 wtnbgo 版），提供 PSBFile 类。
 
 ## 下一步
 
