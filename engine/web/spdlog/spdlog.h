@@ -1,10 +1,10 @@
 #pragma once
 // Minimal header-only spdlog stub for the web plugin build. The krkr2 plugins
 // only use spdlog::get(name) + logger->warn/info/error as diagnostics; the
-// real library and fmt are not needed on the web target.
+// real library and fmt are not needed on the web target. Kept C++11 so the
+// plugin sources do not need C++17.
 #include <memory>
 #include <string>
-#include <string_view>
 
 namespace spdlog {
 
@@ -27,7 +27,7 @@ public:
     void flush() noexcept {}
 };
 
-inline std::shared_ptr<logger> get(std::string_view) {
+inline std::shared_ptr<logger> get(const std::string &) {
     static auto instance = std::make_shared<logger>();
     return instance;
 }

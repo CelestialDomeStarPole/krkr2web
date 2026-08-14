@@ -1,0 +1,242 @@
+--- a/external/krkrz/plugin/fstat/main.cpp
++++ b/external/krkrz/plugin/fstat/main.cpp
+@@ -1,7 +1,11 @@
+ #include <string>
+ #include <vector>
+-#include <filesystem>
++#include <dirent.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <cerrno>
+ #include <fstream>
++#include <sstream>
+ #include <spdlog/spdlog.h>
+ 
+ #include "combase.h"
+@@ -12,7 +16,56 @@
+ #include "PluginImpl.h"
+ #include "StorageImpl.h"
+ 
+-namespace fs = std::filesystem;
++struct FsEntry {
++    std::string name;
++    bool is_dir;
++    uint32_t mode;
++    uint64_t size;
++    uint64_t mtime;
++};
++
++inline bool fs_exists(const std::string &p) { return ::access(p.c_str(), F_OK) == 0; }
++inline bool fs_is_dir(const std::string &p) {
++    struct stat st;
++    return ::stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
++}
++inline bool fs_is_regular(const std::string &p) {
++    struct stat st;
++    return ::stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
++}
++inline bool fs_create_dirs(const std::string &p) {
++    if (p.empty() || fs_exists(p)) return true;
++    size_t slash = p.find_last_of('/');
++    if (slash != std::string::npos) fs_create_dirs(p.substr(0, slash));
++    return ::mkdir(p.c_str(), 0755) == 0;
++}
++inline std::vector<FsEntry> fs_list_dir(const std::string &p) {
++    std::vector<FsEntry> out;
++    DIR *d = ::opendir(p.c_str());
++    if (!d) return out;
++    struct dirent *ent;
++    while ((ent = ::readdir(d)) != nullptr) {
++        FsEntry e;
++        e.name = ent->d_name;
++        std::string full = p + '/' + e.name;
++        struct stat st;
++        if (::stat(full.c_str(), &st) == 0) {
++            e.is_dir = S_ISDIR(st.st_mode);
++            e.mode = (uint32_t)st.st_mode;
++            e.size = (uint64_t)st.st_size;
++            e.mtime = (uint64_t)st.st_mtim.tv_sec;
++        } else {
++            e.is_dir = (ent->d_type == DT_DIR);
++            e.mode = 0;
++            e.size = 0;
++            e.mtime = 0;
++        }
++        out.push_back(e);
++    }
++    ::closedir(d);
++    return out;
++}
++
+ using namespace std;
+ 
+ #define LOGGER spdlog::get("plugin")
+@@ -89,9 +142,9 @@
+ 
+         // 2. 遍历路径查找文件
+         for(const auto &p : paths) {
+-            fs::path full = fs::path(p) / filename;
+-            if(fs::exists(full) && fs::is_regular_file(full)) {
+-                return fs::absolute(full).string();
++            std::string full = p + '/' + filename;
++            if(fs_exists(full) && fs_is_regular(full)) {
++                return full;
+             }
+         }
+ 
+@@ -456,16 +509,16 @@
+ 
+     static void _dirtree(const ttstr &path, const ttstr &subdir,
+                          iTJSDispatch2 *array, tjs_int &count, bool dironly) {
+-        fs::path fsPath(path.c_str());
+-        if(!fs::exists(fsPath) || !fs::is_directory(fsPath))
++        std::string fsPath = path.AsNarrowStdString();
++        if(!fs_exists(fsPath) || !fs_is_dir(fsPath))
+             return;
+ 
+-        for(auto &entry : fs::directory_iterator(fsPath)) {
+-            auto name = entry.path().filename().string();
++        for(auto &entry : fs_list_dir(fsPath)) {
++            const std::string &name = entry.name;
+             if(name == "." || name == "..")
+                 continue;
+ 
+-            if(entry.is_directory()) {
++            if(entry.is_dir) {
+                 ttstr fullName = subdir + name + TJS_W("/");
+                 setDirListFile(array, count++, fullName, entry);
+                 _dirtree(path + name + TJS_W("/"), fullName, array, count,
+@@ -500,7 +553,7 @@
+ 
+     typedef bool (*DirListCallback)(
+         iTJSDispatch2 *array, tjs_int count, const ttstr &file,
+-        const std::filesystem::directory_entry &entry);
++        const FsEntry &entry);
+ 
+ private:
+     static tTJSVariant _dirlist(ttstr dir, DirListCallback cb) {
+@@ -516,14 +569,14 @@
+         tTJSVariant result;
+ 
+         try {
+-            fs::path path(dir.c_str());
+-            if(!fs::exists(path) || !fs::is_directory(path)) {
++            std::string path = dir.AsNarrowStdString();
++            if(!fs_exists(path) || !fs_is_dir(path)) {
+                 TVPThrowExceptionMessage(TJS_W("Directory not found."));
+             }
+ 
+             tjs_int count = 0;
+-            for(auto &entry : fs::directory_iterator(path)) {
+-                ttstr file = entry.path().filename().string();
++            for(auto &entry : fs_list_dir(path)) {
++                ttstr file = entry.name;
+                 if((*cb)(array, count, file, entry))
+                     count++;
+             }
+@@ -541,7 +594,7 @@
+ 
+     static bool setDirListFile(iTJSDispatch2 *array, tjs_int count,
+                                const ttstr &file,
+-                               const std::filesystem::directory_entry &entry) {
++                               const FsEntry &entry) {
+         // [dirlist] 配列に追加する
+         tTJSVariant val(file);
+         array->PropSetByNum(0, count, &val, array);
+@@ -550,7 +603,7 @@
+ 
+     static bool setDirListInfo(iTJSDispatch2 *array, tjs_int count,
+                                const ttstr &file,
+-                               const std::filesystem::directory_entry &entry) {
++                               const FsEntry &entry) {
+         iTJSDispatch2 *dict = TJSCreateDictionaryObject();
+         if(!dict)
+             return false;
+@@ -562,24 +615,19 @@
+                           dict);
+ 
+             // 文件大小
+-            int64_t size = entry.is_regular_file() ? entry.file_size() : 0;
++            int64_t size = !entry.is_dir ? (int64_t)entry.size : 0;
+             tTJSVariant vsize = size;
+             dict->PropSet(TJS_MEMBERENSURE, TJS_W("size"), nullptr, &vsize,
+                           dict);
+ 
+             // 文件属性（权限 & 类型）
+-            int32_t attrib = static_cast<int32_t>(entry.status().permissions());
++            int32_t attrib = (int32_t)(entry.mode & 0777);
+             tTJSVariant vattr = attrib;
+             dict->PropSet(TJS_MEMBERENSURE, TJS_W("attrib"), nullptr, &vattr,
+                           dict);
+ 
+             // 文件时间
+-            auto ftime = entry.last_write_time(); // mtime
+-            auto sctp = std::chrono::time_point_cast<
+-                std::chrono::system_clock::duration>(
+-                ftime - decltype(ftime)::clock::now() +
+-                std::chrono::system_clock::now());
+-            int64_t mtime = std::chrono::system_clock::to_time_t(sctp);
++            int64_t mtime = (int64_t)entry.mtime;
+ 
+             tTJSVariant vmtime = mtime;
+             dict->PropSet(TJS_MEMBERENSURE, TJS_W("mtime"), nullptr, &vmtime,
+@@ -648,7 +696,7 @@
+         }
+         dir = TVPNormalizeStorageName(dir);
+         TVPGetLocalName(dir);
+-        const bool r = fs::create_directories(dir.AsNarrowStdString());
++        const bool r = fs_create_dirs(dir.AsNarrowStdString());
+         if(!r) {
+             TVPAddLog(ttstr(TJS_W("createDirectory : ")) + dir +
+                       TJS_W(" failed."));
+@@ -667,7 +715,7 @@
+                 "'/' must be specified at the end of given directory name."));
+         }
+         TVPGetLocalName(dir);
+-        const bool r = fs::create_directories(dir.AsNarrowStdString());
++        const bool r = fs_create_dirs(dir.AsNarrowStdString());
+         if(!r) {
+             TVPAddLog(ttstr(TJS_W("createDirectory : ")) + dir +
+                       TJS_W(" failed."));
+@@ -762,7 +810,7 @@
+         dir = TVPNormalizeStorageName(dir);
+         TVPGetLocalName(dir);
+         const std::string &p = dir.AsNarrowStdString();
+-        return fs::exists(p) && fs::is_directory(p);
++        return fs_exists(p) && fs_is_dir(p);
+     }
+ 
+     /**
+@@ -826,10 +874,11 @@
+     static ttstr getDisplayName(ttstr filename) {
+         filename = TVPNormalizeStorageName(filename);
+         TVPGetLocalName(filename);
+-        fs::path p = filename.AsNarrowStdString();
+-        if(!fs::exists(p))
++        std::string p = filename.AsNarrowStdString();
++        if(!fs_exists(p))
+             return ""; // 文件不存在返回空
+-        return p.filename().string(); // 返回文件名部分
++        size_t slash = p.find_last_of('/');
++        return slash == std::string::npos ? p : p.substr(slash + 1);
+     }
+ 
+     /**
+@@ -964,14 +1013,14 @@
+ 
+         const std::string u8Filename = filename.AsNarrowStdString();
+ 
+-        if(!fs::exists(u8Filename))
++        if(!fs_exists(u8Filename))
+             return false;
+ 
+         if(folder) {
+-            if(!fs::is_directory(u8Filename))
++            if(!fs_is_dir(u8Filename))
+                 return false;
+         } else {
+-            if(!fs::is_regular_file(u8Filename))
++            if(!fs_is_regular(u8Filename))
+                 return false;
+             // 尝试打开文件，验证可访问
+             std::ifstream file(u8Filename, std::ios::in);

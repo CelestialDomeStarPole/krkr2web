@@ -1,0 +1,20 @@
+diff --git a/external/krkrz/plugin/ncbind.hpp b/external/krkrz/plugin/ncbind.hpp
+--- a/external/krkrz/plugin/ncbind.hpp
++++ b/external/krkrz/plugin/ncbind.hpp
+@@ -4,15 +4,15 @@
+ #include "tjsCommHead.h"
+-#include "StorageImpl.h"
+ #include "tjsNative.h"
+ #include "ScriptMgnIntf.h"
+ #include "tjsArray.h"
+ #include "tjsDictionary.h"
+ #include "DebugIntf.h"
+ #include "MsgIntf.h"
+ #include "CharacterSet.h"
+ 
+ #include "ncb_invoke.hpp"
+ #include <map>
+ #include <list>
++#include <set>
+ 
+ inline std::set<ttstr> TVPRegisteredPlugins;

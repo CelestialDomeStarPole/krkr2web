@@ -59,7 +59,7 @@
     var line = String(message);
     logLines.push((isError ? "ERR " : "") + line);
     if (isError && !firstError) { firstError = line; }
-    if (logLines.length > 200) { logLines.shift(); }
+    if (logLines.length > 2000) { logLines.shift(); }
     render();
   }
 
@@ -211,7 +211,7 @@
     });
   });
   window.d5CompatState = function () {
-    return { networkBytes: networkBytes, cacheBytes: cacheBytes, cacheEntries: cache.size, readCalls: readCalls, completedReads: completedReads, lastRead: lastRead, lastReadAdler: lastReadAdler, firstError: firstError, log: logLines.slice(-100) };
+    return { networkBytes: networkBytes, cacheBytes: cacheBytes, cacheEntries: cache.size, readCalls: readCalls, completedReads: completedReads, lastRead: lastRead, lastReadAdler: lastReadAdler, firstError: firstError, log: logLines.slice(-2000) };
   };
   render();
 }());

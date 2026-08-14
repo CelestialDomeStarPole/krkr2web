@@ -1,0 +1,9 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -621,3 +621,5 @@
+ list(APPEND KRKRSDL2_LIBS
++	-Wl,--whole-archive
+ 	${KRKRSDL2COMMON_NAME}
++	-Wl,--no-whole-archive
+ )

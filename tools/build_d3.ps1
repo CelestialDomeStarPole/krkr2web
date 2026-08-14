@@ -106,6 +106,15 @@ if (-not (Test-Path $exportMarker)) {
     Set-Content -LiteralPath $exportMarker -Value $expectedExportMarker -Encoding ASCII -NoNewline
 }
 
+# krkr2web ADR-008: copy project-owned web shims (spdlog stub + storage/file compat)
+# into the build tree on every build, so shim edits take effect without re-exporting.
+$webShimSource = Join-Path $projectRoot "engine\web"
+$webShimTarget = Join-Path $source "external\krkrz\web"
+if (Test-Path $webShimSource) {
+    New-Item -ItemType Directory -Force $webShimTarget | Out-Null
+    Copy-Item (Join-Path $webShimSource "*") -Destination $webShimTarget -Recurse -Force
+}
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `

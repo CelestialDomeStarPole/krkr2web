@@ -1,0 +1,8 @@
+diff --git a/external/krkrz/tjs2/tjsString.h b/external/krkrz/tjs2/tjsString.h
+--- a/external/krkrz/tjs2/tjsString.h
++++ b/external/krkrz/tjs2/tjsString.h
+@@ -128,3 +128,4 @@
+ 	tTJSString(const tjs_string &str) { Ptr = TJSAllocVariantString(str.c_str()); }
++	tTJSString(const std::string &str) { Ptr = TJSAllocVariantString(str.c_str()); } // UTF-8 narrow string (krkr2 plugin interop)
+ 
+ 	//--------------------------------------------------------- destructor --

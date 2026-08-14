@@ -1,0 +1,26 @@
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -16,4 +16,7 @@
+ #include "PluginImpl.h"
+ #include "StorageImpl.h"
+ #include "GraphicsLoaderImpl.h"
++#ifdef __EMSCRIPTEN__
++#include "ncbind.hpp"
++#endif
+ 
+@@ -1209,4 +1209,13 @@
+ 	else
+ 	{
+-		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_NOOP ")) + name);
++		static bool ncbAllRegistered = false;
++		if(!ncbAllRegistered) {
++			ncbAutoRegister::AllRegist();
++			ncbAllRegistered = true;
++		}
++		if(ncbAutoRegister::LoadModule(name)) {
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_NCB ")) + name);
++		} else {
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_NOOP ")) + name);
++		}
+ 	}

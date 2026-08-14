@@ -21,6 +21,47 @@
           "target": "external/krkrz/base/KAGParser.h"
         }
       ]
+    },
+    {
+      "name": "NCBPlugins",
+      "repository": "https://github.com/2468785842/krkr2.git",
+      "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
+      "localCheckout": "参考资料/开源项目/krkr2",
+      "license": "LICENSE",
+      "files": [
+        {
+          "source": "cpp/core/plugin/ncbind.hpp",
+          "target": "external/krkrz/plugin/ncbind.hpp"
+        },
+        {
+          "source": "cpp/core/plugin/ncb_invoke.hpp",
+          "target": "external/krkrz/plugin/ncb_invoke.hpp"
+        },
+        {
+          "source": "cpp/core/plugin/ncb_foreach.inc",
+          "target": "external/krkrz/plugin/ncb_foreach.inc"
+        },
+        {
+          "source": "cpp/core/plugin/ncbind.cpp",
+          "target": "external/krkrz/plugin/ncbind.cpp"
+        },
+        {
+          "source": "cpp/core/plugin/PluginImpl.h",
+          "target": "external/krkrz/plugin/PluginImpl.h"
+        },
+        {
+          "source": "cpp/core/plugin/PluginIntf.h",
+          "target": "external/krkrz/plugin/PluginIntf.h"
+        },
+        {
+          "source": "cpp/core/environ/Platform.h",
+          "target": "external/krkrz/environ/Platform.h"
+        },
+        {
+          "source": "cpp/plugins/fstat/main.cpp",
+          "target": "external/krkrz/plugin/fstat/main.cpp"
+        }
+      ]
     }
   ],
   "patches": [
@@ -33,6 +74,12 @@
     "patches/0007-web-plugin-contract.patch",
     "patches/0008-web-addfont-shim.patch",
     "patches/0009-web-uncompressed-save.patch",
-    "patches/0010-web-motion-shim.patch"
+    "patches/0010-web-motion-shim.patch",
+    "patches/0011-ncbind-set-include.patch",
+    "patches/0013-tjsstring-std-string-ctor.patch",
+    "patches/0014-ncb-plugin-build.patch",
+    "patches/0015-ncb-link-loadmodule.patch",
+    "patches/0016-fstat-no-filesystem.patch",
+    "patches/0017-whole-archive-plugins.patch"
   ]
 }

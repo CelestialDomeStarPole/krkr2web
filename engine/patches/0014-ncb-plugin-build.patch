@@ -1,0 +1,21 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -166,4 +166,17 @@
+ endif()
+ 
++if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
++# krkr2web ADR-008: NCB plugin framework + first ported plugin (fstat) + web shims
++list(APPEND KRKRSDL2COMMON_SRC
++	external/krkrz/plugin/ncbind.cpp
++	external/krkrz/plugin/fstat/main.cpp
++	external/krkrz/web/plugin_compat.cpp
++)
++list(APPEND KRKRSDL2COMMON_INCLUDES
++	external/krkrz/plugin
++	external/krkrz/web
++)
++endif()
++
+ list(APPEND KRKRSDL2_DEFINITIONS
+ 	TVP_COMPILING_KRKRSDL2
