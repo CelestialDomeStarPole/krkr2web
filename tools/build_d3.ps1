@@ -152,6 +152,16 @@ $saveStructSource = Join-Path $projectRoot "engine\plugins\saveStruct.cpp"
 $saveStructTarget = Join-Path $source "external\krkrz\plugin\saveStruct.cpp"
 Copy-Item -LiteralPath $saveStructSource -Destination $saveStructTarget -Force
 
+# krkr2web ADR-008: copy the textrender + layerExImage visual plugins (project-owned adapted copies).
+$textRenderSource = Join-Path $projectRoot "engine\plugins\textrender"
+$textRenderTarget = Join-Path $source "external\krkrz\plugin\textrender"
+New-Item -ItemType Directory -Force $textRenderTarget | Out-Null
+Copy-Item (Join-Path $textRenderSource "*") -Destination $textRenderTarget -Force
+$layerExImageSource = Join-Path $projectRoot "engine\plugins\layerExImage"
+$layerExImageTarget = Join-Path $source "external\krkrz\plugin\layerExImage"
+New-Item -ItemType Directory -Force $layerExImageTarget | Out-Null
+Copy-Item (Join-Path $layerExImageSource "*") -Destination $layerExImageTarget -Force
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `

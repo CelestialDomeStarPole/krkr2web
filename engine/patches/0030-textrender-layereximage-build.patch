@@ -1,0 +1,10 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -179,3 +179,6 @@
+ 	external/krkrz/plugin/psbfile/PSBMediaRegistry.cpp
+ 	external/krkrz/plugin/saveStruct.cpp
++	external/krkrz/plugin/textrender/TextRender.cpp
++	external/krkrz/plugin/layerExImage/LayerExImage.cpp
++	external/krkrz/plugin/layerExImage/Main.cpp
+ 	external/krkrz/web/plugin_compat.cpp
