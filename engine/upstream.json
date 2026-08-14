@@ -107,6 +107,9 @@
     "patches/0020-ncb-plugins-getsample-scriptsex.patch",
     "patches/0021-getlangname-shim.patch",
     "patches/0022-windowex-shim.patch",
-    "patches/0023-getlocallyaccessiblename-empty-guard.patch"
+    "patches/0023-getlocallyaccessiblename-empty-guard.patch",
+    "patches/0024-loadimages-auto-allocate.patch",
+    "patches/0025-libwebp-decode.patch",
+    "patches/0026-webp-loader-router.patch"
   ]
 }

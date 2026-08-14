@@ -1,0 +1,51 @@
+diff --git a/external/krkrz/visual/GraphicsLoaderIntf.h b/external/krkrz/visual/GraphicsLoaderIntf.h
+--- a/external/krkrz/visual/GraphicsLoaderIntf.h
++++ b/external/krkrz/visual/GraphicsLoaderIntf.h
+@@ -173,4 +173,7 @@
+ extern void TVPLoadTLG(void* formatdata, void *callbackdata, tTVPGraphicSizeCallback sizecallback,
+ 	tTVPGraphicScanLineCallback scanlinecallback, tTVPMetaInfoPushCallback metainfopushcallback,
+ 	tTJSBinaryStream *src, tjs_int keyidx, tTVPGraphicLoadMode mode);
++extern void TVPLoadWEBP(void* formatdata, void *callbackdata, tTVPGraphicSizeCallback sizecallback,
++	tTVPGraphicScanLineCallback scanlinecallback, tTVPMetaInfoPushCallback metainfopushcallback,
++	tTJSBinaryStream *src, tjs_int keyidx, tTVPGraphicLoadMode mode);
+ //---------------------------------------------------------------------------
+@@ -193,4 +196,5 @@
+ extern void TVPLoadHeaderPNG(void* formatdata, tTJSBinaryStream *src, iTJSDispatch2** dic );
+ extern void TVPLoadHeaderJXR(void* formatdata, tTJSBinaryStream *src, iTJSDispatch2** dic );
+ extern void TVPLoadHeaderTLG(void* formatdata, tTJSBinaryStream *src, iTJSDispatch2** dic );
++extern void TVPLoadHeaderWEBP(void* formatdata, tTJSBinaryStream *src, iTJSDispatch2** dic );
+ //---------------------------------------------------------------------------
+diff --git a/external/krkrz/visual/GraphicsLoaderIntf.cpp b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+--- a/external/krkrz/visual/GraphicsLoaderIntf.cpp
++++ b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+@@ -1644,10 +1644,22 @@
+ #ifdef TVP_COMPILING_KRKRSDL2
+-	if (!TVPLoadEmscriptenPreloadedData(handler->FormatData, (void*)&data, TVPLoadGraphic_SizeCallback,
+-		TVPLoadGraphic_ScanLineCallback, TVPLoadGraphic_MetaInfoPushCallback,
+-		name, keyidx, mode))
+-	{
+-		(handler->Load)(handler->FormatData, (void*)&data, TVPLoadGraphic_SizeCallback,
+-			TVPLoadGraphic_ScanLineCallback, TVPLoadGraphic_MetaInfoPushCallback,
+-			holder.Get(), keyidx, mode);
+-	}
++	{
++		// krkr2web ADR-008: the game stores WebP with .png/.jpg/.tlg extensions.
++		uint8_t webp_header[16];
++		tjs_uint64 webp_pos = holder.Get()->GetPosition();
++		bool is_webp = (holder.Get()->Read(webp_header, 16) >= 12 &&
++			!memcmp(webp_header, "RIFF", 4) && !memcmp(webp_header + 8, "WEBPVP8", 7));
++		holder.Get()->SetPosition(webp_pos);
++		if (is_webp) {
++			TVPLoadWEBP(handler->FormatData, (void*)&data, TVPLoadGraphic_SizeCallback,
++				TVPLoadGraphic_ScanLineCallback, TVPLoadGraphic_MetaInfoPushCallback,
++				holder.Get(), keyidx, mode);
++		} else if (!TVPLoadEmscriptenPreloadedData(handler->FormatData, (void*)&data, TVPLoadGraphic_SizeCallback,
++			TVPLoadGraphic_ScanLineCallback, TVPLoadGraphic_MetaInfoPushCallback,
++			name, keyidx, mode))
++		{
++			(handler->Load)(handler->FormatData, (void*)&data, TVPLoadGraphic_SizeCallback,
++				TVPLoadGraphic_ScanLineCallback, TVPLoadGraphic_MetaInfoPushCallback,
++				holder.Get(), keyidx, mode);
++		}
++	}
+ #endif

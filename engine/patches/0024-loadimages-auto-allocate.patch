@@ -1,0 +1,18 @@
+diff --git a/external/krkrz/visual/LayerIntf.cpp b/external/krkrz/visual/LayerIntf.cpp
+--- a/external/krkrz/visual/LayerIntf.cpp
++++ b/external/krkrz/visual/LayerIntf.cpp
+@@ -2520,5 +2520,13 @@
+ 	iTJSDispatch2 * metainfo = NULL;
+ 
+-	TVPLoadGraphic(MainImage, name, colorkey, 0, 0, glmNormal, &provincename, &metainfo);
++	try
++	{
++		TVPLoadGraphic(MainImage, name, colorkey, 0, 0, glmNormal, &provincename, &metainfo);
++	}
++	catch(eTJS &e)
++	{
++		TVPAddLog(ttstr(TJS_W("KRKR2WEB_LOADIMAGES_ERR ")) + name + TJS_W(" : ") + ttstr(e.GetMessage()));
++		throw;
++	}
+ 	try
+ 	{

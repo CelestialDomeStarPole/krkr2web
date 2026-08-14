@@ -1,0 +1,48 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -181,4 +181,44 @@
+ )
+ endif()
+ 
++if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
++# krkr2web ADR-008: libwebp decode + WebP graphic loader (game images are WebP)
++list(APPEND KRKRSDL2COMMON_SRC
++	external/webp/src/dec/alpha_dec.c
++	external/webp/src/dec/buffer_dec.c
++	external/webp/src/dec/frame_dec.c
++	external/webp/src/dec/idec_dec.c
++	external/webp/src/dec/io_dec.c
++	external/webp/src/dec/quant_dec.c
++	external/webp/src/dec/tree_dec.c
++	external/webp/src/dec/vp8_dec.c
++	external/webp/src/dec/vp8l_dec.c
++	external/webp/src/dec/webp_dec.c
++	external/webp/src/dsp/alpha_processing.c
++	external/webp/src/dsp/cpu.c
++	external/webp/src/dsp/dec.c
++	external/webp/src/dsp/dec_clip_tables.c
++	external/webp/src/dsp/filters.c
++	external/webp/src/dsp/lossless.c
++	external/webp/src/dsp/rescaler.c
++	external/webp/src/dsp/upsampling.c
++	external/webp/src/dsp/yuv.c
++	external/webp/src/utils/bit_reader_utils.c
++	external/webp/src/utils/color_cache_utils.c
++	external/webp/src/utils/filters_utils.c
++	external/webp/src/utils/huffman_utils.c
++	external/webp/src/utils/palette.c
++	external/webp/src/utils/quant_levels_dec_utils.c
++	external/webp/src/utils/rescaler_utils.c
++	external/webp/src/utils/random_utils.c
++	external/webp/src/utils/thread_utils.c
++	external/webp/src/utils/utils.c
++	external/krkrz/visual/LoadWEBP.cpp
++)
++list(APPEND KRKRSDL2COMMON_INCLUDES
++	external/webp
++	external/webp/src
++)
++endif()
++
+ list(APPEND KRKRSDL2_DEFINITIONS

@@ -115,6 +115,29 @@ if (Test-Path $webShimSource) {
     Copy-Item (Join-Path $webShimSource "*") -Destination $webShimTarget -Recurse -Force
 }
 
+# krkr2web ADR-008: copy libwebp (WebP decode) + WebP graphic loader (from kirikiroid2-web)
+# into the build tree on every build. The game stores most images as WebP with
+# .png/.jpg/.tlg extensions, so a WebP decoder is required for rendering.
+$webpSource = Join-Path $referenceProjects "libwebp\src"
+$webpTarget = Join-Path $source "external\webp\src"
+if (Test-Path $webpSource) {
+    New-Item -ItemType Directory -Force $webpTarget | Out-Null
+    Copy-Item (Join-Path $webpSource "*") -Destination $webpTarget -Recurse -Force
+}
+$loadWebpSource = Join-Path $projectRoot "engine\webp\LoadWEBP.cpp"
+$loadWebpTarget = Join-Path $source "external\krkrz\visual\LoadWEBP.cpp"
+Copy-Item -LiteralPath $loadWebpSource -Destination $loadWebpTarget -Force
+
+# Generate a minimal libwebp config.h (generic C, no SIMD, no threads) for Emscripten.
+$webpConfigDir = Join-Path $source "external\webp\src\webp"
+New-Item -ItemType Directory -Force $webpConfigDir | Out-Null
+$webpConfig = @"
+/* krkr2web: minimal libwebp config (generic C, no SIMD, no threads). */
+#define PACKAGE_VERSION "1.3.2"
+#define VERSION "1.3.2"
+"@
+Set-Content -LiteralPath (Join-Path $webpConfigDir "config.h") -Value $webpConfig -Encoding ASCII
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `
