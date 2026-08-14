@@ -1,0 +1,23 @@
+diff --git a/external/krkrz/tjs2/tjsVariantString.h b/external/krkrz/tjs2/tjsVariantString.h
+--- a/external/krkrz/tjs2/tjsVariantString.h
++++ b/external/krkrz/tjs2/tjsVariantString.h
+@@ -113,3 +113,18 @@
+ 		tjs_int len = (tjs_int)TJS_narrowtowidelen(ref);
+-		if(len == -1) TJSThrowNarrowToWideConversionError();
++		if(len == -1) {
++			// krkr2web: lenient fallback for invalid CP932 byte sequences
++			// (PSB names decoded from binary data); each byte becomes a wide char.
++			tjs_int rawlen = 0;
++			while(ref[rawlen]) rawlen++;
++			Length = rawlen;
++			if(rawlen > TJS_VS_SHORT_LEN) {
++				LongString = TJSVS_malloc(rawlen+1);
++				for(tjs_int i = 0; i < rawlen; i++) LongString[i] = (tjs_char)(tjs_uint8)ref[i];
++				LongString[rawlen] = 0;
++			} else {
++				for(tjs_int i = 0; i < rawlen; i++) ShortString[i] = (tjs_char)(tjs_uint8)ref[i];
++				ShortString[rawlen] = 0;
++			}
++			return;
++		}
+ 
