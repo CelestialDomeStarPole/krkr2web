@@ -1,0 +1,15 @@
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -1211,3 +1211,11 @@
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM motionplayer.dll"));
+ 	}
++	else if(name == TJS_W("windowEx.dll"))
++	{
++		TVPExecuteScript(
++			TJS_W("if (typeof Window.getNotificationNum == 'undefined') Window.getNotificationNum = function(msg) { return 0; };")
++			TJS_W("if (typeof Window.setDispMode == 'undefined') Window.setDispMode = function(mode) { return 0; };"),
++			TJS_W("krkr2web-windowex-shim"), 0);
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM windowEx.dll"));
++	}
+ 	else if(name == TJS_W("getLangName.dll"))

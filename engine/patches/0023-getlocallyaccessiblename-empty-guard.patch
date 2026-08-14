@@ -1,0 +1,12 @@
+diff --git a/external/krkrz/base/StorageIntf.cpp b/external/krkrz/base/StorageIntf.cpp
+--- a/external/krkrz/base/StorageIntf.cpp
++++ b/external/krkrz/base/StorageIntf.cpp
+@@ -609,6 +609,8 @@
+ ttstr TVPGetLocallyAccessibleName(const ttstr &name)
+ {
++	if(name.IsEmpty()) return TJS_W("");
++		 // empty storage name has no locally accessible name (fixes fstat deleteFile on missing files)
+ 	if(TJS_strchr(name.c_str(), TVPArchiveDelimiter)) return TJS_W("");
+ 		 // in-archive storage is always not accessible from local file system
+ 	return TVPStorageMediaManager.GetLocallyAccessibleName(name);
+ }
