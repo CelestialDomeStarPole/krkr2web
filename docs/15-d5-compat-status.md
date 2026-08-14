@@ -172,9 +172,13 @@ sqscrmask.png 实为 WebP。已接入 libwebp + WebP 加载器 + magic 探测路
 真注册，motionplayer/menu/addFont/getLangName/windowEx 垫片，其余
 （textrender/layerEx*/KAGParserEx/savestruct/extrans/extNagano/PackinOne）仍 NOOP。
 
-画布目前仍为空白：标题画面渲染依赖视觉层插件（textrender/layerExImage/
-layerExDraw/layerExRaster/layerExBtoA），尚未移植。主循环中残留可捕获异常：
-savestruct.dll 的 save2（配置存档）、kag.setMessageHook（KAGParserEx，F10 键）。
+画布目前仍基本空白（950x950 画布仅 24 种颜色、31 个非暗像素）：标题画面渲染
+依赖视觉层插件（textrender/layerExImage/layerExDraw/layerExRaster/layerExBtoA），
+尚未移植。主循环中残留可捕获异常：psdlayer.tjs 的 Scripts.clone(PSB 图层)
+（scriptsEx clone 对 PSBValueDispatch 的处理）、kag.setMessageHook（KAGParserEx）。
+
+savestruct.dll 已真注册（补丁 0029，Array.save2/Dictionary.saveStruct2），配置存档
+异常解除。
 
 ## 下一步
 
