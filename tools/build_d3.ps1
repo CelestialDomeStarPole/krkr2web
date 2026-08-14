@@ -87,8 +87,9 @@ if (-not (Test-Path $exportMarker)) {
             Remove-Item -LiteralPath $archivePath -Force
         }
     }
-    git -C $source init --quiet
-    if ($LASTEXITCODE -ne 0) { throw "Cannot initialize temporary D3 source repository" }
+    # NOTE: do NOT `git init` here. In the DSH sandbox, git apply misreads
+    # file contents whenever a .git directory is present (patch context fails
+    # to match even byte-identical lines). git apply works fine without a repo.
     foreach ($sourceImport in @($engineLock.sourceImports)) {
         $importRoot = Join-Path $projectRoot $sourceImport.localCheckout
         foreach ($file in @($sourceImport.files)) {
@@ -97,10 +98,13 @@ if (-not (Test-Path $exportMarker)) {
             Copy-Item -LiteralPath (Join-Path $importRoot $file.source) -Destination $target -Force
         }
     }
+    # krkr2web: apply patches with python, NOT git apply.  In the DSH sandbox
+    # git.exe sees a different file view (reads/writes never reach the files
+    # other processes see), so git apply silently misapplies everything.
     foreach ($patch in $patches) {
-        git -C $source apply --check --ignore-space-change $patch
+        python (Join-Path $projectRoot "tools\apply_patch.py") --dir $source --check $patch
         if ($LASTEXITCODE -ne 0) { throw "D3 engine patch does not apply: $patch" }
-        git -C $source apply --ignore-space-change $patch
+        python (Join-Path $projectRoot "tools\apply_patch.py") --dir $source $patch
         if ($LASTEXITCODE -ne 0) { throw "D3 engine patch failed: $patch" }
     }
     Set-Content -LiteralPath $exportMarker -Value $expectedExportMarker -Encoding ASCII -NoNewline
@@ -168,6 +172,11 @@ foreach($extra in @("layerExRaster.cpp", "layerExBTOA.cpp", "PackinOne.cpp")) {
     $extraTarget = Join-Path $source ("external\krkrz\plugin\" + $extra)
     Copy-Item -LiteralPath $extraSource -Destination $extraTarget -Force
 }
+
+# krkr2web ADR-008: copy the minimal layerExDraw stub (real one needs libgdiplus/Cocos2D).
+$layerExDrawSource = Join-Path $projectRoot "engine\plugins\layerExDraw.cpp"
+$layerExDrawTarget = Join-Path $source "external\krkrz\plugin\layerExDraw.cpp"
+Copy-Item -LiteralPath $layerExDrawSource -Destination $layerExDrawTarget -Force
 
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null

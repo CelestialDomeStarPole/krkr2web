@@ -116,6 +116,9 @@
     "patches/0029-savestruct-build.patch",
     "patches/0030-textrender-layereximage-build.patch",
     "patches/0031-tjsstring-lenient-narrow.patch",
-    "patches/0032-layer-raster-btoa-packinone.patch"
+    "patches/0032-layer-raster-btoa-packinone.patch",
+    "patches/0033-layerexdraw-stub.patch",
+    "patches/0034-kag-diagnostics.patch",
+    "patches/0035-emscripten-input-path.patch"
   ]
 }

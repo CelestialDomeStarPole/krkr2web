@@ -1,0 +1,8 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -185,3 +185,4 @@
+ 	external/krkrz/plugin/layerExBTOA.cpp
+ 	external/krkrz/plugin/PackinOne.cpp
++	external/krkrz/plugin/layerExDraw.cpp
+ )

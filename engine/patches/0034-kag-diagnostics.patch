@@ -1,0 +1,13 @@
+diff --git a/external/krkrz/base/KAGParser.cpp b/external/krkrz/base/KAGParser.cpp
+--- a/external/krkrz/base/KAGParser.cpp
++++ b/external/krkrz/base/KAGParser.cpp
+@@ -947,3 +947,4 @@
+ void tTJSNI_KAGParser::LoadScenario(const ttstr &name) {
+     // load scenario to buffer
+ 
++    TVPAddLog(ttstr(TJS_W("KRKR2WEB_SCENARIO ")) + name);
+@@ -1051,3 +1052,4 @@
+ void tTJSNI_KAGParser::GoToLabel(const ttstr &name) {
+     // search label and set current position
+     // parameter "name" must start with '*'
++    TVPAddLog(ttstr(TJS_W("KRKR2WEB_LABEL ")) + name);

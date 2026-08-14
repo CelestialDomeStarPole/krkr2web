@@ -1,0 +1,11 @@
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -2611,7 +2611,5 @@
+ 				default:
+ 				{
+-#if !(defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__))
+ 					this->window_receive_event_input(event);
+-#endif
+ 					return;
+ 				}
