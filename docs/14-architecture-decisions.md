@@ -118,3 +118,32 @@ OPFS 等能力；工具链升级成本更高，但兼容边界明确。
 
 **复审条件：** 目标第三方 App 更换内核或产品正式增加另一条现代浏览器构建线。旧
 设备支持仍不能被未声明地移除。
+## ADR-008：游戏插件通过移植 krkr2 的 NCB 框架与插件实现
+
+**状态：** 已接受
+
+**背景：** D5 摸底确认《千恋万花》启动依赖约 15–20 个 .dll 插件（fstat、json、
+layerex_draw/layerExImage/layerExRaster/layerExBTOA、textrender、motionplayer、
+psbfile、PackinOne、csvParser、scriptsEx、addFont、win32dialog/windowEx 等）。这些
+插件不是孤立的 TJS 桩，而是统一建立在 ncbind（Native Class Binding）框架之上。
+krkr2 与 kirikiroid2-web 的 cpp/core/plugin/ 都包含这套框架（ncbind.hpp 约 1954 行、
+ncb_invoke.hpp、ncb_foreach.inc 等）以及全部插件实现；而 krkrsdl2 的 external/krkrz
+是更精简的引擎核心，不含 plugin/、storage/、archive/ 目录，也没有 NCB 框架。因此
+“补插件”的实际工作量是“移植 NCB 框架 + 插件所依赖的一层引擎基础设施 + 插件本身”，
+而不是在 PluginImpl 里逐一手写 TJS 桩。
+
+**决策：** 保持 krkrsdl2 作为 Chrome 89 单线程 Asyncify 运行时底座（D0–D3 已实机验证），
+以“导入源码 + engine patch + 构建审计”的方式（与 D3 导入 KAGParser 同一机制）从
+krkr2 移植 NCB 框架与插件，kirikiroid2-web 作为 motionplayer/PSBFile/PackinOne/
+TextRender 等无公开源码插件的逆向权威参考。按依赖分层推进：纯逻辑插件（fstat、json、
+csvParser、addFont）→ 视觉层插件（layerex_draw、layerExImage、textrender）→ 重型
+逆向插件（motionplayer/Emote、psbfile、PackinOne）。
+
+**后果：** 放弃“手写 TJS 桩逐个绕过”的低保真路线，改为忠实移植真实插件实现；短期内
+需要先打通 NCB 框架与 krkrsdl2 引擎接口的适配，随后每个插件仍是一次可审计的移植。
+移植来源、提交与许可证沿用 engine/upstream.json 的 sourceImports 机制登记。
+
+**复审条件：** 若 NCB 框架与 krkrsdl2 的 TJS2/存储接口差异过大、导致移植成本接近
+“把 krkr2 重新编译一遍”，则重新评估“以 krkr2 为底座、移植 krkrsdl2 的 Web 层”的
+反向方案；该复审必须拿出两者接口差异的量化证据，而不是继续在小范围内打补丁。
+
