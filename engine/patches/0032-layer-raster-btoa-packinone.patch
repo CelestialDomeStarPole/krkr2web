@@ -1,0 +1,16 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -182,8 +182,12 @@
+ 	external/krkrz/plugin/layerExImage/LayerExImage.cpp
+ 	external/krkrz/plugin/layerExImage/Main.cpp
+ 	external/krkrz/web/plugin_compat.cpp
++	external/krkrz/plugin/layerExRaster.cpp
++	external/krkrz/plugin/layerExBTOA.cpp
++	external/krkrz/plugin/PackinOne.cpp
+ )
+ list(APPEND KRKRSDL2COMMON_INCLUDES
+ 	external/krkrz/plugin
+ 	external/krkrz/web
++	external/krkrz/plugin/layerExImage
+ )

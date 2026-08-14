@@ -162,6 +162,13 @@ $layerExImageTarget = Join-Path $source "external\krkrz\plugin\layerExImage"
 New-Item -ItemType Directory -Force $layerExImageTarget | Out-Null
 Copy-Item (Join-Path $layerExImageSource "*") -Destination $layerExImageTarget -Force
 
+# krkr2web ADR-008: copy layerExRaster + layerExBTOA + PackinOne plugins from kirikiroid2-web.
+foreach($extra in @("layerExRaster.cpp", "layerExBTOA.cpp", "PackinOne.cpp")) {
+    $extraSource = Join-Path $referenceProjects ("kirikiroid2-web\cpp\plugins\" + $extra)
+    $extraTarget = Join-Path $source ("external\krkrz\plugin\" + $extra)
+    Copy-Item -LiteralPath $extraSource -Destination $extraTarget -Force
+}
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `
