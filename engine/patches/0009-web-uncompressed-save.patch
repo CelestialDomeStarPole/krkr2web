@@ -1,0 +1,19 @@
+diff --git a/external/krkrz/base/TextStream.cpp b/external/krkrz/base/TextStream.cpp
+--- a/external/krkrz/base/TextStream.cpp
++++ b/external/krkrz/base/TextStream.cpp
+@@ -416,6 +416,14 @@
+ 		if((p = TJS_strchr(modestr.c_str(), TJS_W('z'))) != NULL)
+ 		{
+-			CryptMode = 2; // compressed (cannot be with 'c')
++#ifdef __EMSCRIPTEN__
++			// Web build: zlib deflate (compression) is miscompiled into a
++			// null-function indirect call, so fall back to simple crypt (mode 1).
++			// The reader auto-detects the mode from the 0xfe 0xfe header, so
++			// reads and writes stay self-consistent within this emulator.
++			CryptMode = 1;
++#else
++			CryptMode = 2; // compressed (cannot be with 'c')
++#endif
+ 			if(p[1] >= TJS_W('0') && p[1] <= TJS_W('9'))
+ 				CompressionLevel = p[1] - TJS_W('0');
+ 		}

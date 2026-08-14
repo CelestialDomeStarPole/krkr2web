@@ -31,6 +31,7 @@
     "patches/0005-web-xp3-index-progress.patch",
     "patches/0006-web-decompression-stream.patch",
     "patches/0007-web-plugin-contract.patch",
-    "patches/0008-web-addfont-shim.patch"
+    "patches/0008-web-addfont-shim.patch",
+    "patches/0009-web-uncompressed-save.patch"
   ]
 }

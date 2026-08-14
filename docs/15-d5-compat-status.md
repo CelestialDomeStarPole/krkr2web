@@ -18,8 +18,11 @@
 校验值 665521678 与预期一致。这说明 D0-D4 的 XP3 分块读取、TJS、KAG 和
 Asyncify 桥对真实游戏资源是成立的。
 
-当前阻断点：游戏写压缩存档时，zlib 的 deflateResetKeep 触发 Wasm
-“null function”崩溃（详见下文“已知问题”）。这是当前首个必须解决的硬阻断。
+首个硬阻断（写压缩存档时 zlib deflate 的“null function”崩溃）已通过
+引擎补丁 0009 绕过：Web 构建下把 z 压缩模式降级为简单加密（mode 1），
+读写两端都从 0xfe 0xfe 头自动识别模式，本地存档自洽。补丁生效后游戏
+已跨过存档写入，进入 motionplayer（立绘动画）初始化，当前下一个阻断是
+motion.tjs 需要 Motion.ResourceManager 等类（详见“已知问题”）。
 
 ## 静态扫描结果
 
@@ -70,38 +73,40 @@ kagexopt.dll 等），以及大量仅字节码提及的 DLL。这些暂不阻断
 
 ## 已知问题
 
-### 1. zlib deflate 写存档时 “null function” 崩溃（硬阻断）
+### 1. zlib deflate 写存档时 “null function” 崩溃（已绕过）
 
 写压缩存档时调用链为 tTVPTextWriteStream → deflateInit_ → deflateInit2_ →
 deflateReset → deflateResetKeep，其中 deflateResetKeep 对 adler32 的调用生成
-了指向空函数的 call 0，触发：
+了指向空函数的 call 0，触发 RuntimeError: null function（栈：
+dynCall_v → invoke_v → deflateResetKeep → deflateReset → deflateInit2_ →
+deflateInit_ → tTVPTextWriteStream）。
 
-    RuntimeError: null function
-      at dynCall_v
-      at invoke_v
-      at deflateResetKeep (wasm-function[2082]:0x1a1cfc)
-      at deflateReset
-      at deflateInit2_
-      at deflateInit_
-      at tTVPTextWriteStream::tTVPTextWriteStream(...)
+已排查并排除：GZIP 路径（-DNO_GZIP）、链接期 --no-heap-copy 与 -fPIC、
+编译期 -fPIC 完整去除、zlib 去掉预编译头（PCH）、以及 -sASYNCIFY_REMOVE
+排除 zlib 插桩——均仍崩。inflate（解压）路径工作正常，说明同一 zlib 的 adler32
+从 inflate 侧可正常调用；问题特异于 deflate 侧对 adler32 的调用被改写为指向
+空函数的间接调用（call 0 → invoke_v → dynCall_v → null）。
 
-已排查并排除：GZIP 路径（-DNO_GZIP 后仍崩）、链接期 --no-heap-copy 与
--fPIC 移除（仍崩）、编译期 -fPIC 完整去除并全量重编（仍崩）、zlib 去掉预编译头
-（PCH）单独重编（仍崩）。inflate（解压）路径工作正常，说明同一 zlib 的 adler32
-从 inflate 侧可正常调用；问题特异于 deflate 侧对 adler32 的调用被 Asyncify
-改写为指向空函数的间接调用（call 0 / invoke_v → dynCall_v → null）。
+已采用的绕过方案（引擎补丁 0009）：Web 构建下把 tTVPTextWriteStream 的
+z 压缩模式降级为简单加密（mode 1），避免进入 deflate 路径。读写两端都从
+0xfe 0xfe 头自动识别模式，本地存档自洽。该方案已在本机无头 Chrome 验证
+跨过存档写入，游戏继续推进到 motionplayer 初始化。
 
-反汇编显示 deflateResetKeep 中 adler32 的调用被编译成受 Asyncify 状态门控的
-分支，其中一路调用空函数 0。当前最可能的根因是 -sASYNCIFY=1 全量插桩对
-zlib deflate 链路的误改写。建议按以下优先级修复：
+根因仍未定位（疑似 Asyncify 全量插桩对 zlib deflate 链路的误改写，但
+ASYNCIFY_REMOVE 未消除）。若后续发现其他必须走 zlib deflate 的路径，仍需
+回到根因：用 -sASYNCIFY_ONLY 只插桩真实的 IndexedDB 读取异步入口，避免
+全量插桩 zlib。
 
-1. 用 -sASYNCIFY_ONLY=[...] 只插桩真实的异步入口（IndexedDB 读取桥的
-   emscripten_sleep 链），避免全量插桩 zlib；
-2. 或将 zlib deflate 相关函数加入 ASYNCIFY_BLACKLIST；
-3. 或绕过方案——让 tTVPTextWriteStream 对 z 压缩模式改为写未压缩存档，避免
-   走 deflate 路径（存档仅本地使用，读写同一引擎可自洽）。
+### 2. motionplayer 缺失（当前硬阻断）
 
-### 2. getLangName.dll 缺失（非阻断）
+motion.tjs 中游戏执行 new Motion.ResourceManager(this, 20971520) 时，
+Motion.ResourceManager 为 void（motionplayer.dll 仅 bootstrap-only），抛出
+异常：An exception occured at motion.tjs(1)[(function) MotionResourceManager]。
+需要端口 motionplayer 插件（立绘动画，.mtn 资源 33 个），参考
+参考资料/开源项目/kirikiroid2-web/cpp/plugins/motionplayer/ 与
+参考资料/开源项目/krkr2/cpp/plugins/motionplayer/。
+
+### 3. getLangName.dll 缺失（非阻断）
 
 multilang.tjs 调用 System.getCurrentUILangName() 抛“成员不存在”，被游戏
 捕获并回落英语。需要时可用 TJS 垫片补齐 System.getCurrentUILangName /
@@ -109,9 +114,10 @@ System.getSystemLanguageTag。
 
 ## 下一步
 
-1. 修复 zlib deflate 崩溃（上述方向逐一验证），打通存档写入；
+1. 端口 motionplayer 插件（立绘动画），让 Motion.ResourceManager / Motion.Player
+   可用，跨过 motion.tjs 初始化；
 2. 补齐 getLangName / csvParser 等低成本 TJS 垫片；
 3. 按“标题 → 剧情 → 图层/立绘动画 → 声音 → 存读档 → 性能”顺序推进，端口
-   motionplayer、layerExImage/layerex_draw、textrender、psbfile 等参考实现
+   layerExImage/layerex_draw、textrender、psbfile 等参考实现
    （参考 参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
 4. 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
