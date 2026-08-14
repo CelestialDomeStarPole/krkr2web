@@ -54,16 +54,19 @@ uipsd/langselect.ini（二进制 ini，非阻断）。
 | motionplayer.dll | 最小垫片（补丁 0010） | 立绘动画（.mtn）；仅 ResourceManager 桩，真实动画未实现 |
 | menu.dll | TJS 垫片（补丁 0007） | 菜单类；游戏 fallback menubarhack 已走通 |
 | addfont.dll | TJS 垫片（补丁 0008） | 字体注册映射到 Font.addFont |
-| fstat.dll | no-op（优雅降级） | 存档改名；游戏 try/catch 后 disableFileRename=true |
+| fstat.dll | ✅ NCB 真注册（补丁 0011-0017） | 文件 stat/改名/删除；deleteFile 空路径异常已修（补丁 0023） |
+| getSample.dll | ✅ NCB 真注册 | WaveSoundBuffer.setDefaultAheads/enableGetSample（voice.tjs 异常解除） |
+| scriptsEx.dll | ✅ NCB 真注册 | Scripts.foreach/equalStruct 等（kagenvironment 异常解除） |
+| csvParser.dll | ✅ OLD tp_stub 真注册（补丁 0018-0019） | CSVParser 全局类（配置 CSV 解析异常解除） |
+| getLangName.dll | ✅ TJS 垫片（补丁 0021） | System.getCurrentUILangName 回落 ja/日本語 |
+| windowEx.dll | ✅ TJS 垫片（补丁 0022） | Window.getNotificationNum/setDispMode（getNotificationNum 异常解除） |
 | k2compat.dll | no-op（优雅降级） | 游戏自带 Krkr2CompatUtils fallback |
-| getLangName.dll | no-op（异常被捕获） | 缺 System.getCurrentUILangName；语言回落 en |
-| KAGParserEx.dll | no-op | KAG 解析扩展 |
-| layerExImage/Raster/Draw/BtoA.dll | no-op | 图层扩展（kirikiroid2-web 有参考实现） |
+| KAGParserEx.dll | no-op | KAG 解析扩展；缺 kag.setMessageHook（keybinder.tjs 当前阻断） |
+| layerExImage/Raster/Draw/BtoA.dll | no-op | 图层扩展；缺 Layer.loadImages（sqscr.tjs 当前阻断） |
 | textrender.dll | no-op | 文本渲染（kirikiroid2-web 有参考实现） |
 | PackinOne.dll | no-op | 打包档案 |
 | proxyfs.dll | no-op | 代理文件系统 |
-| csvParser.dll | no-op | CSV 解析 |
-| win32dialog.dll / windowEx.dll | no-op | 桌面对话框/窗口，Web 无对应 |
+| win32dialog.dll | no-op | 桌面对话框，Web 无对应 |
 | wuvorbis.dll / wuopus.dll | no-op | 音频解码；引擎原生声轨应覆盖 .ogg/.opus |
 | AlphaMovie.dll | no-op | 带 alpha 视频（D6 范畴） |
 | yuzuex/psbfile/psd/extnagano 等 | 尚未 link 或触及 | 柚子社/PSB 图像，随剧情推进用 |
@@ -110,40 +113,55 @@ getMotion/loadMotion 返回 void、unload/clear 空实现），motion.tjs 初始
 参考资料/开源项目/kirikiroid2-web/cpp/plugins/motionplayer/（约 60 个源文件、
 含 EmoteEngine/Player 等完整动画引擎，工作量大）。
 
-### 3. csvParser 缺失（当前阻断）
+### 3. csvParser 缺失（已解决）
 
-utils.tjs 的 loadConfigFile 在解析 imagediffmap.csv 时 typeof CSVParser 为
-undefined，Plugins.link("csvParser.dll") 为 no-op 后读取全局 CSVParser 失败：
-An exception occured at utils.tjs(1)[(function) loadConfigFile]。需要提供
-CSVParser 全局（CSV 解析），该插件在 krkr2 / kirikiroid2-web 参考仓库中均无
-实现，需按游戏用法反向确定 API。
+已按 OLD tp_stub 系统从 wtnbgo/csvParser 真移植（补丁 0018-0019）：剥掉
+DLL 导出/导入桩机（V2Link/V2Unlink，因 krkrsdl2 无 import-stub 运行时），
+改用 KAGParser 同款 classid 适配（TJS_NATIVE_SET_ClassID 重定义 + TJS_NCM_REG_THIS
+= classobj），并从 Plugins.link("csvParser.dll") 直接调 csvparser_init()。
+启动日志输出 KRKR2WEB_D5_PLUGIN_TJS csvParser.dll，CSVParser 全局类注册成功。
 
-### 4. kagenvironment.tjs initCommand 异常（当前阻断）
+### 4. kagenvironment.tjs initCommand 异常（已解决）
 
-kagenvironment.tjs 的 initCommand 在 Scripts.foreach(objects, ...) 处抛异常
-（An exception occured at kagenvironment.tjs(1)[(function) initCommand]），
-疑似与 KAGParserEx / scriptsEx 等 KAG 扩展插件缺失导致的命令/对象注册不全
-有关，需继续定位。
+根因是 Scripts.foreach 缺失（scriptsEx 插件）。已从 krkr2 真移植 scriptsEx.cpp
+（NCB，补丁 0020），Scripts.foreach/equalStruct 等注册成功，kagenvironment
+异常解除。
 
-### 5. getLangName.dll 缺失（非阻断）
+### 5. getLangName / windowEx（已垫片）
 
-multilang.tjs 调用 System.getCurrentUILangName() 抛“成员不存在”，被游戏
-捕获并回落英语。需要时可用 TJS 垫片补齐 System.getCurrentUILangName /
-System.getSystemLanguageTag。
+getLangName（System.getCurrentUILangName，补丁 0021）与 windowEx
+（Window.getNotificationNum/setDispMode，补丁 0022）已用最小 TJS 垫片补齐，
+voice/multilang/keybinder 的 Window 消息计数路径不再抛异常。
+
+### 6. kag.setMessageHook 缺失（当前阻断，KAGParserEx）
+
+keybinder.tjs 调用 kag.setMessageHook(true, num) 抛“成员不存在”，该方法是
+KAGParserEx（wtnbgo）给 kag 对象加的 KAG 扩展，krkr2/kirikiroid2-web 参考仓库
+均无实现，需从 wtnbgo/KAGParserEx 克隆移植。
+
+### 7. Layer.loadImages 缺失（当前阻断，layerEx 图层扩展）
+
+sqscr.tjs 的 loadone 调用 layer.loadImages("sqscrmask") 抛“成员不存在”。
+loadImages 属于 wtnbgo 的 layerEx 系列图层扩展（kirikiroid2-web 的 layerExImage
+只覆盖 light/colorize/modulate/noise 等，未含 loadImages），需从
+wtnbgo/layerExImage（或 uyjulian/layerExImage）克隆移植。
 
 ## 下一步
 
 按 ADR-008 从 krkr2 真移植 NCB 框架与插件（不再手写 TJS 桩）：
 
-1. ✅ NCB 框架 + 首个插件 fstat 已正式接入引擎并在真实游戏启动中注册成功
-   （Plugins.link("fstat.dll") 输出 KRKR2WEB_D5_PLUGIN_NCB）。补丁 0011-0017、
-   sourceImports NCBPlugins、engine/web 垫片已提交，链路已打通。
-2. 批量推进纯逻辑插件（json、csvParser、addFont、scriptsEx、shrinkCopy、
-   KAGParserEx、layerExBtoA 等），复用 fstat 的“导入 + 适配 + 注册”流程；
-3. 再视觉层插件（layerex_draw、layerExImage、textrender）；
-4. 最后啃重型逆向插件（motionplayer/Emote、psbfile、PackinOne，参考
-   参考资料/开源项目/kirikiroid2-web/cpp/plugins/）；
-5. 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
+1. ✅ NCB 框架 + fstat 已正式接入（补丁 0011-0017）。
+2. ✅ 纯逻辑插件批量推进：csvParser（OLD tp_stub 系统，补丁 0018-0019）、
+   getSample + scriptsEx（NCB，补丁 0020）、getLangName/windowEx 垫片
+   （补丁 0021-0022）、fstat deleteFile 空路径修复（补丁 0023）。
+   启动日志确认 6 个插件已真注册/垫片，voice/multilang/kagenvironment/mainwindow
+   4 处启动异常解除。
+3. ⏳ 视觉层插件（KAGParserEx 的 kag.setMessageHook、layerEx 的 loadImages、
+   layerex_draw、layerExImage、textrender）——当前 2 处残留阻断；需克隆
+   wtnbgo/KAGParserEx 与 wtnbgo/layerExImage。
+4. ⏳ 重型逆向插件（motionplayer/Emote、psbfile、PackinOne，参考
+   参考资料/开源项目/kirikiroid2-web/cpp/plugins/）。
+5. ⏳ 目标 WebView 89 实机验收（20 FPS、60 分钟稳定性）——需真机人工执行。
 
 ## 插件移植摸底（ADR-008 验证）
 
