@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "senren-banka-v1",
+  "entryPackage": "data.xp3",
+  "requiredPackages": [
+    "data.xp3",
+    "adult.xp3",
+    "video.xp3"
+  ],
+  "autoPathPackages": [
+    "adult.xp3",
+    "video.xp3"
+  ],
+  "engineArguments": [
+    "-debugwin=no",
+    "-krkr2web-motion-bootstrap=yes"
+  ],
+  "runtime": {
+    "initialWasmMemoryBytes": 67108864,
+    "maximumWasmMemoryBytes": 536870912,
+    "indexedDbChunkBytes": 4194304,
+    "indexedDbCacheChunks": 4,
+    "xp3SegmentCacheBytes": 1048576
+  },
+  "display": {
+    "mode": "1080p"
+  },
+  "plugins": {
+    "motionplayer.dll": "bootstrap-only"
+  },
+  "videoStrategy": "deferred-d6",
+  "allowStartupTimeoutReady": false
+}

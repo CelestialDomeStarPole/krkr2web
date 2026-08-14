@@ -1,0 +1,225 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3b3ad24..5584235 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -187,10 +187,17 @@ list(APPEND KRKRSDL2_LDFLAGS
+ 	-sINITIAL_MEMORY=${KRKRSDL2_EMSCRIPTEN_INITIAL_MEMORY}
+ 	-sFORCE_FILESYSTEM=1
+ 	-sASSERTIONS=0
++	-sASYNCIFY=1
++	-sASYNCIFY_STACK_SIZE=131072
++	-sMIN_CHROME_VERSION=89
++	-sENVIRONMENT=web
++	-sDYNAMIC_EXECUTION=0
++	-sMAXIMUM_MEMORY=536870912
++	-sSTACK_SIZE=1048576
+ 	-sSTACK_OVERFLOW_CHECK=0
+ 	-sMODULARIZE=1
+ 	-sEXPORT_NAME="instantiate_krkrsdl2_module"
+-	-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS']
++	-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS','addRunDependency','removeRunDependency']
+ 	-sUSE_SDL=2
+ 	-lidbfs.js
+ 	-lopenal
+diff --git a/src/core/base/sdl2/StorageImpl.h b/src/core/base/sdl2/StorageImpl.h
+index 0929874..6877d91 100644
+--- a/src/core/base/sdl2/StorageImpl.h
++++ b/src/core/base/sdl2/StorageImpl.h
+@@ -214,6 +214,10 @@ class tTVPLocalFileStream : public tTJSBinaryStream
+ private:
+ 	SDL_RWops * io_handle;
+ 	bool written;
++#ifdef __EMSCRIPTEN__
++	int web_handle;
++	tjs_uint64 web_position;
++#endif
+ 
+ public:
+ 	tTVPLocalFileStream(const ttstr &origname, const ttstr & localname,
+diff --git a/src/core/environ/sdl2/Application.cpp b/src/core/environ/sdl2/Application.cpp
+index 7072352..720f5af 100644
+--- a/src/core/environ/sdl2/Application.cpp
++++ b/src/core/environ/sdl2/Application.cpp
+@@ -51,5 +51,15 @@
+ #include "StorageIntf.h"
+ #include "TVPColor.h"
+ #include "WindowImpl.h"
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++
++EM_JS(void, krkr2web_sync_savedata, (), {
++	FS.syncfs(false, function(error) {
++		if (error && Module.printErr) Module.printErr("IDBFS save sync failed: " + error);
++		_emscripten_syncfs_is_finished();
++	});
++});
++#endif
+ #ifndef _WIN32
+ #include "VirtualKey.h"
+@@ -803,7 +813,7 @@ void tTVPApplication::Run() {
+ 		should_sync_savedata_ = false;
+ 		syncfs_is_finished_ = false;
+ #ifdef __EMSCRIPTEN__
+-		emscripten_run_script("FS.syncfs(false, function (err) { Module._" "emscripten_syncfs_is_finished" "(); });");
++		krkr2web_sync_savedata();
+ #endif
+ 	}
+ 	if (done)
+diff --git a/src/core/base/sdl2/StorageImpl.cpp b/src/core/base/sdl2/StorageImpl.cpp
+index 5d09940..c7cf4bc 100644
+--- a/src/core/base/sdl2/StorageImpl.cpp
++++ b/src/core/base/sdl2/StorageImpl.cpp
+@@ -27,5 +27,27 @@
+ #include "TickCount.h"
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++
++EM_JS(int, krkr2web_open_cached_package, (const char *path), {
++	return Module.krkr2Storage ? Module.krkr2Storage.open(UTF8ToString(path)) : 0;
++});
++EM_JS(int, krkr2web_cached_package_exists, (const char *path), {
++	return Module.krkr2Storage && Module.krkr2Storage.exists(UTF8ToString(path)) ? 1 : 0;
++});
++EM_JS(double, krkr2web_cached_package_size, (int handle), {
++	return Module.krkr2Storage ? Module.krkr2Storage.size(handle) : -1;
++});
++EM_ASYNC_JS(int, krkr2web_read_cached_package,
++	(int handle, double offset, int length, unsigned char *destination), {
++	return await Module.krkr2Storage.readToHeap(
++		handle, offset, length, destination, HEAPU8);
++});
++EM_JS(void, krkr2web_close_cached_package, (int handle), {
++	if (Module.krkr2Storage) Module.krkr2Storage.close(handle);
++});
++#endif
++
+ #ifndef _WIN32
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -719,6 +744,14 @@ bool TVPCheckExistentLocalFile(const ttstr &name)
+ //---------------------------------------------------------------------------
+ bool TVPCheckExistentLocalFile(const ttstr &name)
+ {
++#ifdef __EMSCRIPTEN__
++	std::string web_filename;
++	if(TVPUtf16ToUtf8(web_filename, name.AsStdString()) &&
++		krkr2web_cached_package_exists(web_filename.c_str()))
++	{
++		return true;
++	}
++#endif
+ #ifdef _WIN32
+ 	DWORD attrib = ::GetFileAttributes(name.c_str());
+ 	if(attrib == 0xffffffff || (attrib & FILE_ATTRIBUTE_DIRECTORY))
+@@ -918,6 +951,10 @@ tTVPLocalFileStream::tTVPLocalFileStream(const ttstr &origname,
+ 	const ttstr &localname, tjs_uint32 flag)
+ {
+ 	tjs_uint32 access = flag & TJS_BS_ACCESS_MASK;
++#ifdef __EMSCRIPTEN__
++	web_handle = 0;
++	web_position = 0;
++#endif
+ 	io_handle = NULL;
+ 	written = false;
+ 	const char* mode = "rb";
+@@ -936,6 +973,13 @@ tTVPLocalFileStream::tTVPLocalFileStream(const ttstr &origname,
+ 	std::string filename;
+ 	TVPUtf16ToUtf8( filename, localname.AsStdString() );
+ 
++#ifdef __EMSCRIPTEN__
++	if(access == TJS_BS_READ && (web_handle = krkr2web_open_cached_package(filename.c_str())) != 0)
++	{
++		return;
++	}
++#endif
++
+ retry:
+ 	io_handle = SDL_RWFromFile(filename.c_str(), mode);
+ 	if(io_handle == nullptr)
+@@ -976,4 +1021,10 @@ tTVPLocalFileStream::~tTVPLocalFileStream()
+ {
++#ifdef __EMSCRIPTEN__
++	if (web_handle != 0)
++	{
++		krkr2web_close_cached_package(web_handle);
++	}
++#endif
+ 	if (io_handle != nullptr)
+ 	{
+ 		SDL_RWclose(io_handle);
+@@ -993,6 +1044,34 @@ tTVPLocalFileStream::~tTVPLocalFileStream()
+ //---------------------------------------------------------------------------
+ tjs_uint64 TJS_INTF_METHOD tTVPLocalFileStream::Seek(tjs_int64 offset, tjs_int whence)
+ {
++#ifdef __EMSCRIPTEN__
++	if (web_handle != 0)
++	{
++		tjs_uint64 base = 0;
++		switch(whence)
++		{
++		case TJS_BS_SEEK_SET: base = 0; break;
++		case TJS_BS_SEEK_CUR: base = web_position; break;
++		case TJS_BS_SEEK_END: base = GetSize(); break;
++		default: TVPThrowExceptionMessage(TVPSeekError);
++		}
++		const tjs_uint64 size = GetSize();
++		if (base > size) TVPThrowExceptionMessage(TVPSeekError);
++		if (offset < 0)
++		{
++			const tjs_uint64 distance = static_cast<tjs_uint64>(-(offset + 1)) + 1;
++			if (distance > base) TVPThrowExceptionMessage(TVPSeekError);
++			web_position = base - distance;
++		}
++		else
++		{
++			const tjs_uint64 distance = static_cast<tjs_uint64>(offset);
++			if (distance > size - base) TVPThrowExceptionMessage(TVPSeekError);
++			web_position = base + distance;
++		}
++		return web_position;
++	}
++#endif
+ 	int dwmm;
+ 	switch(whence)
+ 	{
+@@ -1012,6 +1091,23 @@ tjs_uint64 TJS_INTF_METHOD tTVPLocalFileStream::Seek(tjs_int64 offset, tjs_int whence)
+ //---------------------------------------------------------------------------
+ tjs_uint TJS_INTF_METHOD tTVPLocalFileStream::Read(void *buffer, tjs_uint read_size)
+ {
++#ifdef __EMSCRIPTEN__
++	if (web_handle != 0)
++	{
++		tjs_uint64 available = GetSize() - web_position;
++		tjs_uint bounded = read_size;
++		if (available < bounded) bounded = static_cast<tjs_uint>(available);
++		int result = krkr2web_read_cached_package(web_handle,
++			static_cast<double>(web_position), static_cast<int>(bounded),
++			static_cast<unsigned char *>(buffer));
++		if (result < 0)
++		{
++			TVPThrowExceptionMessage(TVPReadError);
++		}
++		web_position += static_cast<tjs_uint>(result);
++		return static_cast<tjs_uint>(result);
++	}
++#endif
+ 	size_t ret = SDL_RWread(io_handle, buffer, 1, read_size);
+ 	return (tjs_uint)ret;
+ }
+@@ -1029,6 +1125,15 @@ void TJS_INTF_METHOD tTVPLocalFileStream::SetEndOfStorage()
+ //---------------------------------------------------------------------------
+ tjs_uint64 TJS_INTF_METHOD tTVPLocalFileStream::GetSize()
+ {
++#ifdef __EMSCRIPTEN__
++	if (web_handle != 0)
++	{
++		double size = krkr2web_cached_package_size(web_handle);
++		if (size < 0)
++			TVPThrowExceptionMessage(TVPSeekError);
++		return static_cast<tjs_uint64>(size);
++	}
++#endif
+ #if 0
+ 	tjs_uint64 oldpos = Seek(0, TJS_BS_SEEK_CUR);
+ 	tjs_uint64 retpos = Seek(0, TJS_BS_SEEK_END);

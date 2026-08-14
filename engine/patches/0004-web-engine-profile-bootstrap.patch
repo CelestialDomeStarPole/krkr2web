@@ -1,0 +1,66 @@
+diff --git a/src/core/environ/sdl2/Application.cpp b/src/core/environ/sdl2/Application.cpp
+index 720f5af..258aad1 100644
+--- a/src/core/environ/sdl2/Application.cpp
++++ b/src/core/environ/sdl2/Application.cpp
+@@ -437,4 +437,35 @@ const tjs_char * exception_to_str(EXCEPTION_POINTERS *ep)
+ 
+ #endif
++#ifdef __EMSCRIPTEN__
++static void TVPConfigureWebEngineProfile()
++{
++	tTJSVariant profile_value;
++	if (TVPGetCommandLine(TJS_W("-krkr2web-profile"), &profile_value))
++	{
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PROFILE ")) + (ttstr)profile_value);
++	}
++
++	const tjs_char *prefix = TJS_W("-krkr2web-autopath=");
++	const size_t prefix_length = TJS_strlen(prefix);
++	for (tjs_int i = 1; i < _argc; i += 1)
++	{
++		if (!TJS_strncmp(_wargv[i], prefix, prefix_length))
++		{
++			ttstr path(_wargv[i] + prefix_length);
++			TVPAddAutoPath(path);
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_AUTOPATH ")) + path);
++		}
++	}
++
++	if (TVPGetCommandLine(TJS_W("-krkr2web-motion-bootstrap")))
++	{
++		TVPExecuteScript(
++			TJS_W("global.Motion = %[\"Player\" => %[\"useD3D\" => 0]];"),
++			TJS_W("krkr2web-motion-bootstrap"), 0);
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_BOOTSTRAP motionplayer.dll bootstrap-only"));
++	}
++}
++#endif
++
+ bool tTVPApplication::StartApplication( int argc, tjs_char* argv[] ) {
+ 	// _set_se_translator(se_translator_function);
+@@ -483,6 +518,10 @@ bool tTVPApplication::StartApplication( int argc, tjs_char* argv[] ) {
+ 
+ 		TVPSystemInit();
+ 
++#ifdef __EMSCRIPTEN__
++		TVPConfigureWebEngineProfile();
++#endif
++
+ 		if(TVPCheckAbout()) return true; // version information dialog box;
+ 
+ 		SetTitle( tjs_string(TVPKirikiri) );
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+index d7e60a9..121031b 100644
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -1144,6 +1144,10 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+ 
+ 	ttstr name = *param[0];
+ 
++#ifdef __EMSCRIPTEN__
++	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_LINK ")) + name);
++#endif
++
+ 	TVPLoadPlugin(name);
+ 
+ 	return TJS_S_OK;

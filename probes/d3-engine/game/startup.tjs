@@ -1,0 +1,233 @@
+var d3ProbeWidth = 960;
+var d3ProbeHeight = 540;
+var d3ProbeLastInputTick = 0;
+var d3ProbeSavePath = System.dataPath + "kag-progress.dat";
+var d3ProbeStage = "boot";
+var d3ProbeText = "";
+var d3ProbeBranch = "";
+var d3ProbeChoiceIndex = 0;
+var d3ProbeSaveRestored = false;
+var d3ProbeAudio = void;
+var d3ProbeLayer = void;
+var d3ProbeTimer = void;
+var d3ProbeHeartbeat = 0;
+var d3ProbeKag = new KAGParser();
+var d3ProbeFontFaces = Font.addFont("DroidSansFallback.ttf");
+
+function d3ProbeDraw()
+{
+    d3ProbeLayer.loadImages("probe.bmp", clNone);
+    d3ProbeLayer.font.face = d3ProbeFontFaces[0];
+    d3ProbeLayer.font.height = 27;
+    d3ProbeLayer.font.bold = true;
+    d3ProbeLayer.fillRect(32, 326, 896, 184, 0xEE101820);
+    d3ProbeLayer.drawText(58, 350, d3ProbeText, 0xFFFFFFFF);
+
+    if(d3ProbeStage == "intro") {
+        d3ProbeLayer.font.height = 21;
+        d3ProbeLayer.drawText(58, 454, "Tap or click once to continue", 0xFFE9BB4D);
+    } else if(d3ProbeStage == "choice") {
+        d3ProbeLayer.fillRect(58, 414, 398, 66, d3ProbeChoiceIndex == 0 ? 0xFF3F78A8 : 0xFF253B4F);
+        d3ProbeLayer.fillRect(504, 414, 398, 66, d3ProbeChoiceIndex == 1 ? 0xFFA8516B : 0xFF4A2C36);
+        d3ProbeLayer.font.height = 22;
+        d3ProbeLayer.drawText(92, 434, "Follow the light", 0xFFFFFFFF);
+        d3ProbeLayer.drawText(538, 434, "Listen to the rain", 0xFFFFFFFF);
+    } else if(d3ProbeStage == "checkpoint") {
+        d3ProbeLayer.font.height = 21;
+        d3ProbeLayer.drawText(58, 454, "Branch saved. Use Reload save check above.", 0xFF62D79A);
+    } else if(d3ProbeStage == "restored") {
+        d3ProbeLayer.fillRect(32, 312, 896, 8, 0xFF62D79A);
+        d3ProbeLayer.font.height = 21;
+        d3ProbeLayer.drawText(58, 454, "KAG parser state restored successfully", 0xFF62D79A);
+    }
+    d3ProbeLayer.update();
+}
+
+function d3ProbePlaySound()
+{
+    try {
+        d3ProbeAudio.play();
+        Debug.message("KRKR2WEB_D3_AUDIO_OK", d3ProbeAudio.status);
+    } catch(error) {
+        Debug.message("KRKR2WEB_D3_AUDIO_ERROR", error.message);
+    }
+}
+
+function d3ProbeHeartbeatTick()
+{
+    d3ProbeHeartbeat++;
+    var width = (d3ProbeHeartbeat % 112) * 8;
+    d3ProbeLayer.fillRect(32, 300, 896, 8, 0xFF253039);
+    if(width > 0) d3ProbeLayer.fillRect(32, 300, width, 8, 0xFF62D79A);
+    d3ProbeLayer.update();
+    Debug.message("KRKR2WEB_D3_HEARTBEAT", d3ProbeHeartbeat, System.getTickCount());
+}
+
+function d3ProbeSaveKag(branch)
+{
+    var progress = %[
+        "parser" => d3ProbeKag.store(),
+        "branch" => branch
+    ];
+    (Dictionary.saveStruct incontextof progress)(d3ProbeSavePath, "b");
+    Debug.message("KRKR2WEB_D3_KAG_STATE_SAVED", branch, d3ProbeKag.curLine, d3ProbeKag.curPos);
+    Debug.message("KRKR2WEB_D3_SAVE_WRITTEN", branch);
+}
+
+function d3ProbePumpKag()
+{
+    while(true) {
+        var tag = d3ProbeKag.getNextTag();
+        if(tag === void) {
+            d3ProbeStage = "restored";
+            d3ProbeDraw();
+            return;
+        }
+
+        var name = tag.tagname;
+        if(name == "probe") {
+            d3ProbeText = tag.text;
+            Debug.message("KRKR2WEB_D3_KAG_TEXT", tag.phase, tag.text);
+            if(tag.phase == "intro") {
+                d3ProbeStage = "intro";
+            } else if(tag.phase == "branch") {
+                d3ProbeStage = "checkpoint";
+                d3ProbeBranch = tag.branch;
+                Debug.message("KRKR2WEB_D3_KAG_BRANCH", tag.branch);
+            } else if(tag.phase == "restored") {
+                d3ProbeStage = "restored";
+                d3ProbeBranch = tag.branch;
+            }
+            d3ProbeDraw();
+        } else if(name == "wait") {
+            return;
+        } else if(name == "choice") {
+            d3ProbeStage = "choice";
+            d3ProbeChoiceIndex = 0;
+            d3ProbeText = "Choose a route";
+            d3ProbeDraw();
+            Debug.message("KRKR2WEB_D3_KAG_CHOICE", "left", "right");
+            return;
+        } else if(name == "checkpoint") {
+            d3ProbeStage = "checkpoint";
+            d3ProbeBranch = tag.branch;
+            d3ProbeSaveKag(tag.branch);
+            d3ProbeDraw();
+            return;
+        } else if(name == "end") {
+            d3ProbeStage = "restored";
+            d3ProbeDraw();
+            return;
+        }
+    }
+}
+
+function d3ProbeHandleKey(key)
+{
+    var kind = key >= 0x1B0 && key <= 0x1DF ? "gamepad" : "keyboard";
+    Debug.message("KRKR2WEB_D3_KEY_DOWN", kind, key);
+
+    if(key == 0x0D || key == 0x20 || key == 0x1C0) {
+        var action = d3ProbeStage == "intro" ? "advance" : "confirm";
+        Debug.message("KRKR2WEB_D3_INPUT_ACTION", kind, action);
+        d3ProbeHandleInput(kind, d3ProbeChoiceIndex == 0 ? 0 : d3ProbeWidth, 0);
+    } else if(key == 0x25 || key == 0x26 || key == 0x1B5 || key == 0x1B6) {
+        if(d3ProbeStage == "choice") {
+            d3ProbeChoiceIndex = 0;
+            d3ProbeDraw();
+        }
+        Debug.message("KRKR2WEB_D3_INPUT_ACTION", kind, "move-left");
+    } else if(key == 0x27 || key == 0x28 || key == 0x1B7 || key == 0x1B8) {
+        if(d3ProbeStage == "choice") {
+            d3ProbeChoiceIndex = 1;
+            d3ProbeDraw();
+        }
+        Debug.message("KRKR2WEB_D3_INPUT_ACTION", kind, "move-right");
+    } else if(key == 0x1B || key == 0x08 || key == 0x1C1) {
+        Debug.message("KRKR2WEB_D3_INPUT_ACTION", kind, "cancel");
+    }
+}
+
+function d3ProbeHandleInput(kind, x, y)
+{
+    var tick = System.getTickCount();
+    if(tick - d3ProbeLastInputTick < 250) return;
+    d3ProbeLastInputTick = tick;
+    Debug.message("KRKR2WEB_D3_INPUT_OK", kind, d3ProbeStage);
+    d3ProbePlaySound();
+
+    if(d3ProbeStage == "intro") {
+        d3ProbePumpKag();
+    } else if(d3ProbeStage == "choice") {
+        var logicalX = x;
+        if(logicalX >= 0 && logicalX <= 1) logicalX *= d3ProbeWidth;
+        var target = logicalX < d3ProbeWidth / 2 ? "*left" : "*right";
+        d3ProbeKag.goToLabel(target);
+        d3ProbePumpKag();
+    }
+}
+
+class D3ProbeWindow extends Window
+{
+    function D3ProbeWindow() { super.Window(...); }
+    function onClick(x, y) { d3ProbeHandleInput("click", x, y); }
+    function onMouseDown(x, y, button, shift) { Debug.message("KRKR2WEB_D3_MOUSE_DOWN", x, y); }
+    function onTouchDown(x, y, cx, cy, id) { Debug.message("KRKR2WEB_D3_TOUCH_DOWN", x, y, id); }
+    function onTouchUp(x, y, cx, cy, id) { d3ProbeHandleInput("touch", x, y); }
+    function onKeyDown(key, shift) {
+        if((shift & 0x80) == 0) d3ProbeHandleKey(key);
+    }
+    function onKeyUp(key, shift) {
+        var kind = key >= 0x1B0 && key <= 0x1DF ? "gamepad" : "keyboard";
+        Debug.message("KRKR2WEB_D3_KEY_UP", kind, key);
+    }
+    function onTimer() { d3ProbeHeartbeatTick(); }
+}
+
+var d3ProbeWindow = new D3ProbeWindow();
+d3ProbeWindow.setInnerSize(d3ProbeWidth, d3ProbeHeight);
+d3ProbeWindow.caption = "KRKR2 Web D3 KAG probe";
+
+d3ProbeLayer = new Layer(d3ProbeWindow, null);
+d3ProbeLayer.loadImages("probe.bmp", clNone);
+d3ProbeLayer.setSizeToImageSize();
+d3ProbeLayer.face = dfOpaque;
+d3ProbeLayer.type = ltOpaque;
+d3ProbeLayer.visible = true;
+d3ProbeWindow.add(d3ProbeLayer);
+
+try {
+    d3ProbeAudio = new WaveSoundBuffer(d3ProbeWindow);
+    d3ProbeAudio.open("tone.wav");
+    Debug.message("KRKR2WEB_D3_AUDIO_OPEN", d3ProbeAudio.status);
+} catch(error) {
+    Debug.message("KRKR2WEB_D3_AUDIO_ERROR", error.message);
+}
+
+d3ProbeWindow.visible = true;
+d3ProbeTimer = new Timer(d3ProbeWindow, "onTimer");
+d3ProbeTimer.interval = 1000;
+d3ProbeTimer.enabled = true;
+if(Storages.isExistentStorage(d3ProbeSavePath)) {
+    try {
+        var restored = Dictionary.loadStruct(d3ProbeSavePath, "b");
+        d3ProbeBranch = restored.branch;
+        d3ProbeKag.restore(restored.parser);
+        d3ProbeSaveRestored = true;
+        Debug.message("KRKR2WEB_D3_KAG_RESTORED", d3ProbeBranch, d3ProbeKag.curLine, d3ProbeKag.curPos);
+        Debug.message("KRKR2WEB_D3_SAVE_RESTORED", d3ProbeBranch);
+        d3ProbePumpKag();
+    } catch(error) {
+        Debug.message("KRKR2WEB_D3_SAVE_ERROR", error.message);
+    }
+} else {
+    d3ProbeKag.ignoreCR = true;
+    d3ProbeKag.processSpecialTags = true;
+    d3ProbeKag.loadScenario("scenario.ks");
+    d3ProbePumpKag();
+}
+
+d3ProbeWindow.update();
+Debug.message("KRKR2WEB_D3_IMAGE_TEXT_OK");
+Debug.message("KRKR2WEB_D3_KAG_READY", d3ProbeKag.curStorage, d3ProbeKag.curLine, d3ProbeKag.curPos);
+Debug.message("KRKR2WEB_D3_INTERACTIVE_READY");

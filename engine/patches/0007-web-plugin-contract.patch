@@ -1,0 +1,48 @@
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -1151,11 +1151,42 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+ 	ttstr name = *param[0];
+ 
+ #ifdef __EMSCRIPTEN__
+ 	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_LINK ")) + name);
++	if(name == TJS_W("menu.dll"))
++	{
++		TVPExecuteScript(
++			TJS_W("class KRKR2WebMenuItem {")
++			TJS_W("var owner = void; var parent = void; var children = []; var index = -1;")
++			TJS_W("var caption = ''; var enabled = true; var checked = false;")
++			TJS_W("var radio = false; var group = 0; var shortcut = ''; var visible = true;")
++			TJS_W("function MenuItem(owner, caption) { this.owner = owner; if(caption !== void) this.caption = caption; }")
++			TJS_W("function KRKR2WebMenuItem(owner, caption) { this.MenuItem(owner, caption); }")
++			TJS_W("function refreshIndexes() { for(var i = 0; i < children.count; i++) children[i].index = i; }")
++			TJS_W("function add(item) { if(item === void) return; item.parent = this; children.push(item); refreshIndexes(); }")
++			TJS_W("function insert(item, index) { if(item === void) return; item.parent = this; children.insert(index, item); refreshIndexes(); }")
++			TJS_W("function remove(item) { var target = children.find(item); if(target >= 0) children.erase(target); if(item !== void) item.parent = void; refreshIndexes(); }")
++			TJS_W("function click() { if(typeof this.onClick != 'undefined') this.onClick(); }")
++			TJS_W("function popup(flags, x, y) { return -1; }")
++			TJS_W("function finalize() { children.clear(); parent = void; owner = void; }")
++			TJS_W("}")
++			TJS_W("global.MenuItem = KRKR2WebMenuItem;")
++			TJS_W("global.Window.menu = new KRKR2WebMenuItem(void, '');"),
++			TJS_W("krkr2web-menu-shim"), 0);
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM menu.dll"));
++	}
++	else if(name == TJS_W("motionplayer.dll") &&
++		TVPGetCommandLine(TJS_W("-krkr2web-motion-bootstrap")))
++	{
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_BOOTSTRAP motionplayer.dll linked"));
++	}
++	else
++	{
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_NOOP ")) + name);
++	}
++#else
++	TVPLoadPlugin(name);
+ #endif
+ 
+-	TVPLoadPlugin(name);
+-
+ 	return TJS_S_OK;
+ }
+ TJS_END_NATIVE_STATIC_METHOD_DECL_OUTER(/*object to register*/cls,

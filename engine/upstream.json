@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/krkrsdl2/krkrsdl2.git",
+  "commit": "3f384a6869f6726929c777bdd0e0c871d5d5383d",
+  "localCheckout": "参考资料/开源项目/krkrsdl2",
+  "emscriptenVersion": "3.1.64",
+  "sourceImports": [
+    {
+      "name": "KAGParser",
+      "repository": "https://github.com/2468785842/krkr2.git",
+      "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
+      "localCheckout": "参考资料/开源项目/krkr2",
+      "license": "LICENSE",
+      "files": [
+        {
+          "source": "cpp/core/base/KAGParser.cpp",
+          "target": "external/krkrz/base/KAGParser.cpp"
+        },
+        {
+          "source": "cpp/core/base/KAGParser.h",
+          "target": "external/krkrz/base/KAGParser.h"
+        }
+      ]
+    }
+  ],
+  "patches": [
+    "patches/0001-web-indexeddb-xp3.patch",
+    "patches/0002-enable-kag-parser.patch",
+    "patches/0003-web-preserve-host-layout.patch",
+    "patches/0004-web-engine-profile-bootstrap.patch",
+    "patches/0005-web-xp3-index-progress.patch",
+    "patches/0006-web-decompression-stream.patch",
+    "patches/0007-web-plugin-contract.patch",
+    "patches/0008-web-addfont-shim.patch"
+  ]
+}

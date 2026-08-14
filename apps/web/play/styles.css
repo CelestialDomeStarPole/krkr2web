@@ -1,0 +1,16 @@
+:root { color-scheme: dark; font-family: Arial, "Microsoft YaHei", sans-serif; background: #050607; color: #f4f5f6; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+body { display: grid !important; grid-template-rows: 52px minmax(0, 1fr); background: #050607 !important; letter-spacing: 0; }
+.player-bar { min-width: 0; display: grid !important; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 0 12px; border-bottom: 1px solid #30363b; background: #15191d; }
+.player-bar strong { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.player-actions { display: flex; align-items: center; gap: 10px; }
+.player-actions span { color: #9da6ad; font-size: 12px; }
+.icon-button { width: 38px; height: 38px; display: inline-grid !important; place-items: center; padding: 0; border: 1px solid #505960; border-radius: 4px; background: transparent; color: #f1f3f4; font-size: 22px; line-height: 1; text-decoration: none; }
+.stage { position: relative; min-width: 0; min-height: 0; display: grid !important; place-items: center; overflow: hidden; background: #020303; }
+canvas { width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; display: block !important; outline: none; }
+.loading-panel { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(420px, calc(100% - 40px)); display: grid; gap: 8px; transform: translate(-50%, -50%); padding: 20px; border: 1px solid #41494f; border-radius: 6px; background: rgba(20, 24, 27, .96); text-align: center; }
+.loading-panel strong { font-size: 17px; }
+.loading-panel span { color: #aab2b8; font-size: 13px; line-height: 1.5; }
+body[data-state="ready"] .loading-panel { display: none; }
+body[data-state="fail"] .loading-panel { border-color: #754c50; }

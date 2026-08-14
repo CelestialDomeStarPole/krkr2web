@@ -1,0 +1,69 @@
+diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive.cpp
+index ea98c1b..3355ca0 100644
+--- a/external/krkrz/base/XP3Archive.cpp
++++ b/external/krkrz/base/XP3Archive.cpp
+@@ -27,6 +27,47 @@
+ #endif
+ #include <algorithm>
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++
++EM_ASYNC_JS(int, krkr2web_uncompress,
++	(unsigned char *destination, unsigned long *destination_length,
++	 const unsigned char *source, unsigned long source_length), {
++	if (typeof DecompressionStream !== "function") {
++		if (Module.printErr) Module.printErr("KRKR2WEB_E_DECOMPRESSION_STREAM_UNAVAILABLE");
++		return -2;
++	}
++	try {
++		var input = HEAPU8.slice(source, source + source_length);
++		var stream = new Blob([input]).stream().pipeThrough(new DecompressionStream("deflate"));
++		var output = new Uint8Array(await new Response(stream).arrayBuffer());
++		var capacity = HEAPU32[destination_length >> 2];
++		if (output.byteLength > capacity) return -5;
++		HEAPU8.set(output, destination);
++		HEAPU32[destination_length >> 2] = output.byteLength;
++		return 0;
++	} catch (error) {
++		if (Module.printErr) {
++			Module.printErr("KRKR2WEB_E_DECOMPRESSION_FAILED " +
++				(error && error.message ? error.message : String(error)));
++		}
++		return -3;
++	}
++});
++
++static int TVPXP3Uncompress(unsigned char *destination, unsigned long *destination_length,
++	const unsigned char *source, unsigned long source_length)
++{
++	return krkr2web_uncompress(destination, destination_length, source, source_length);
++}
++#else
++static int TVPXP3Uncompress(unsigned char *destination, unsigned long *destination_length,
++	const unsigned char *source, unsigned long source_length)
++{
++	return uncompress(destination, destination_length, source, source_length);
++}
++#endif
++
+ bool TVPAllowExtractProtectedStorage = true;
+ 
+ 
+@@ -401,6 +442,6 @@ tTVPXP3Archive::tTVPXP3Archive(const ttstr & name) : tTVPArchive(name)
+ 						TJS_W(" last=") + ttstr((tjs_int)compressed[compressed_size - 1]));
+ #endif
+-					int result = uncompress(  /* uncompress from zlib */
++					int result = TVPXP3Uncompress(
+ 						(unsigned char *)indexdata,
+ 						&destlen, (unsigned char*)compressed,
+ 							(unsigned long)compressed_size);
+@@ -704,7 +745,7 @@ public:
+ 
+ 			Data = new tjs_uint8 [outsize];
+ 			unsigned long destlen = outsize;
+-			int result = uncompress( (unsigned char*)Data, &outsize,
++			int result = TVPXP3Uncompress((unsigned char*)Data, &destlen,
+ 				(unsigned char*)indata, insize);
+ 			if(result != Z_OK || destlen != outsize)
+ 				TVPThrowExceptionMessage(TVPUncompressionFailed);

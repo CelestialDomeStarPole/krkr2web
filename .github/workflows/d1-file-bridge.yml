@@ -1,0 +1,38 @@
+name: D1 IndexedDB file bridge
+
+on:
+  push:
+    paths:
+      - "probes/d1-file-bridge/**"
+      - "toolchains/d0-toolchain.lock.json"
+      - "tools/build_d1.sh"
+      - "tools/check_d0_artifacts.py"
+      - "tools/check_d1_artifacts.py"
+      - "tools/setup_d0_toolchain.sh"
+      - ".github/workflows/d1-file-bridge.yml"
+  pull_request:
+    paths:
+      - "probes/d1-file-bridge/**"
+      - "toolchains/d0-toolchain.lock.json"
+      - "tools/build_d1.sh"
+      - "tools/check_d0_artifacts.py"
+      - "tools/check_d1_artifacts.py"
+      - "tools/setup_d0_toolchain.sh"
+      - ".github/workflows/d1-file-bridge.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KRKR2_EMSDK_DIR: ${{ runner.temp }}/emsdk
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install locked Emscripten toolchain
+        run: tools/setup_d0_toolchain.sh
+      - name: Build and check D1 probe
+        run: tools/build_d1.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d1-file-bridge-probe
+          path: build/d1-file-bridge

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>KRKR2 Web D1 文件读取探针</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">KRKR2 WEB / D1</p>
+        <h1>IndexedDB 文件读取探针</h1>
+      </div>
+      <span id="overall-badge" class="badge badge-idle">等待开始</span>
+    </header>
+
+    <section class="summary-band" aria-labelledby="summary-title">
+      <div>
+        <h2 id="summary-title">文件桥门禁</h2>
+        <p id="summary-text">准备约 40 MiB 稀疏测试数据后，验证逻辑 5 GiB 文件的按需读取。</p>
+      </div>
+      <dl class="build-meta">
+        <div><dt>逻辑文件</dt><dd id="logical-size">5 GiB+</dd></div>
+        <div><dt>缓存块</dt><dd>4 MiB × 4</dd></div>
+        <div><dt>随机读取</dt><dd>10,000 次</dd></div>
+      </dl>
+    </section>
+
+    <section class="progress-band" aria-label="测试进度">
+      <div class="progress-track" aria-hidden="true"><span id="progress-fill"></span></div>
+      <div class="progress-copy">
+        <strong id="progress-title">尚未运行</strong>
+        <span id="progress-detail">点击下方按钮开始。</span>
+      </div>
+    </section>
+
+    <div class="content-grid">
+      <section class="results-panel" aria-labelledby="results-title">
+        <div class="section-heading">
+          <h2 id="results-title">门禁结果</h2>
+          <span id="result-count">0 / 11</span>
+        </div>
+        <ol id="results-list" class="results-list" aria-live="polite"></ol>
+      </section>
+
+      <section class="metrics-panel" aria-labelledby="metrics-title">
+        <div class="section-heading">
+          <h2 id="metrics-title">性能与内存</h2>
+          <span id="elapsed-value">未运行</span>
+        </div>
+        <dl class="metrics-grid">
+          <div><dt>读取速率</dt><dd id="ops-value">--</dd></div>
+          <div><dt>有效吞吐</dt><dd id="throughput-value">--</dd></div>
+          <div><dt>最长页面间隔</dt><dd id="gap-value">--</dd></div>
+          <div><dt>IndexedDB 读取</dt><dd id="idb-value">--</dd></div>
+          <div><dt>块缓存峰值</dt><dd id="cache-value">--</dd></div>
+          <div><dt>Wasm 堆</dt><dd id="wasm-value">--</dd></div>
+        </dl>
+        <p id="runtime-details" class="runtime-details">设备信息将在运行后显示。</p>
+      </section>
+    </div>
+
+    <section class="actions-band" aria-label="测试操作">
+      <button id="run-button" class="primary-button" type="button">开始 D1 测试</button>
+      <button id="background-button" type="button" disabled>后台恢复测试</button>
+      <button id="soak-button" type="button" disabled>10 分钟稳定性测试</button>
+      <button id="upload-button" type="button" disabled>上传测试结果</button>
+      <p id="upload-status" role="status"></p>
+    </section>
+
+    <section class="stability-band" aria-labelledby="stability-title">
+      <div class="section-heading">
+        <h2 id="stability-title">稳定性门禁</h2>
+        <span id="stability-count">0 / 2</span>
+      </div>
+      <div class="stability-grid">
+        <div>
+          <strong>后台恢复</strong>
+          <span id="background-status">等待快速测试通过。</span>
+        </div>
+        <div>
+          <strong>10 分钟趋势</strong>
+          <span id="soak-status">等待快速测试通过。</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./d1-module.js"></script>
+  <script src="./storage.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

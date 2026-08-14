@@ -1,0 +1,19 @@
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -1172,6 +1172,15 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM menu.dll"));
+ 	}
++	else if(name == TJS_W("addFont.dll"))
++	{
++		TVPExecuteScript(
++			TJS_W("System.addFont = function(storage) { return Font.addFont(storage); };")
++			TJS_W("global.AddFont = function(storage) { return Font.addFont(storage); };")
++			TJS_W("global.AddTrueTypeFont = function(storage) { return Font.addFont(storage); };"),
++			TJS_W("krkr2web-addfont-shim"), 0);
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM addFont.dll"));
++	}
+ 	else if(name == TJS_W("motionplayer.dll") &&
+ 		TVPGetCommandLine(TJS_W("-krkr2web-motion-bootstrap")))
+ 	{
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_BOOTSTRAP motionplayer.dll linked"));

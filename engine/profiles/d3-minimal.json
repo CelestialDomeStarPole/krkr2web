@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "d3-minimal",
+  "entryPackage": "data.xp3",
+  "requiredPackages": [
+    "data.xp3"
+  ],
+  "autoPathPackages": [],
+  "engineArguments": [],
+  "runtime": {
+    "initialWasmMemoryBytes": 67108864,
+    "maximumWasmMemoryBytes": 536870912,
+    "indexedDbChunkBytes": 4194304,
+    "indexedDbCacheChunks": 4,
+    "xp3SegmentCacheBytes": 1048576
+  },
+  "display": {
+    "mode": "game-defined"
+  },
+  "plugins": {},
+  "videoStrategy": "not-used",
+  "allowStartupTimeoutReady": true
+}

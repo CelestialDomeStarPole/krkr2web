@@ -1,0 +1,84 @@
+diff --git a/src/config/src_list/kirikirisdl2/sources.txt b/src/config/src_list/kirikirisdl2/sources.txt
+index 7103e3d..914449d 100644
+--- a/src/config/src_list/kirikirisdl2/sources.txt
++++ b/src/config/src_list/kirikirisdl2/sources.txt
+@@ -1,5 +1,6 @@
+ external/krkrz/base/BinaryStream.cpp
+ external/krkrz/base/CharacterSet.cpp
++external/krkrz/base/KAGParser.cpp
+ external/krkrz/base/EventIntf.cpp
+ external/krkrz/base/PluginIntf.cpp
+ external/krkrz/base/ScriptMgnIntf.cpp
+diff --git a/external/krkrz/base/ScriptMgnIntf.cpp b/external/krkrz/base/ScriptMgnIntf.cpp
+index cdfad53..f40130e 100644
+--- a/external/krkrz/base/ScriptMgnIntf.cpp
++++ b/external/krkrz/base/ScriptMgnIntf.cpp
+@@ -15,6 +15,7 @@
+ #include "tjsDebug.h"
+ #include "tjsArray.h"
+ #include "ScriptMgnIntf.h"
++#include "KAGParser.h"
+ #include "StorageIntf.h"
+ #include "DebugIntf.h"
+ #include "WindowIntf.h"
+@@ -227,6 +228,9 @@ void TVPInitScriptEngine()
+ 	REGISTER_OBJECT(VertexBinder, TVPCreateNativeClass_VertexBinder());
+ #endif
+ 
++	/* KAG scenario parser */
++	REGISTER_OBJECT(KAGParser, TVPCreateNativeClass_KAGParser());
++
+ 	/* WaveSoundBuffer and its filters */
+ 	iTJSDispatch2 * waveclass = NULL;
+ 	REGISTER_OBJECT( WaveSoundBuffer, ( waveclass = TVPCreateNativeClass_SoundBuffer() ) );
+diff --git a/external/krkrz/base/KAGParser.cpp b/external/krkrz/base/KAGParser.cpp
+index 9a6bf6d..e5fba0c 100644
+--- a/external/krkrz/base/KAGParser.cpp
++++ b/external/krkrz/base/KAGParser.cpp
+@@ -862,9 +862,45 @@ void tTJSNI_KAGParser::Restore(iTJSDispatch2 *dic) {
+             CurLabel = val;
+ 
+-        // load scenario
++        // Load the scenario, then restore the exact parser cursor saved by
++        // Store(). The imported implementation persisted these fields but
++        // previously resumed only at the nearest label.
++        tjs_int savedCurLine = 0;
++        tjs_int savedCurPos = 0;
++        ttstr savedLineBuffer;
++        bool savedLineBufferUsing = false;
++        val.Clear();
++        dic->PropGet(0, TJS_W("curLine"), nullptr, &val, dic);
++        if(val.Type() != tvtVoid)
++            savedCurLine = (tjs_int)val;
++        val.Clear();
++        dic->PropGet(0, TJS_W("curPos"), nullptr, &val, dic);
++        if(val.Type() != tvtVoid)
++            savedCurPos = (tjs_int)val;
++        val.Clear();
++        dic->PropGet(0, TJS_W("lineBuffer"), nullptr, &val, dic);
++        if(val.Type() != tvtVoid)
++            savedLineBuffer = val;
++        val.Clear();
++        dic->PropGet(0, TJS_W("lineBufferUsing"), nullptr, &val, dic);
++        if(val.Type() != tvtVoid)
++            savedLineBufferUsing = 0 != (tjs_int)val;
++
+         ttstr storage = StorageName, label = CurLabel;
+         ClearBuffer(); // ensure re-loading the scenario
+         LoadScenario(storage);
+         GoToLabel(label);
++        if(savedCurLine < 0 || savedCurLine > LineCount || savedCurPos < 0)
++            TVPThrowExceptionMessage(TVPKAGMalformedSaveData);
++        CurLine = savedCurLine;
++        CurPos = savedCurPos;
++        LineBuffer = savedLineBuffer;
++        LineBufferUsing = savedLineBufferUsing;
++        if(LineBufferUsing) {
++            CurLineStr = LineBuffer.c_str();
++        } else if(CurLine < LineCount) {
++            CurLineStr = Lines[CurLine].Start;
++        } else {
++            CurLineStr = nullptr;
++        }
+ 
+         // ExcludeLevel, IfLevel

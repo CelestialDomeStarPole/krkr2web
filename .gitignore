@@ -1,0 +1,74 @@
+# krkr2web 项目忽略规则
+# 说明：
+#   - build/     存放引擎 Wasm、产品壳和各阶段探针构建产物，全部可重建，不提交。
+#   - .toolchains/ 存放锁定的 Emscripten SDK 等本地工具链，体积大、可重建，不提交。
+#   - 参考资料/    开发用游戏资源与上游仓库克隆，不属于模拟器产品，不提交。
+#   - diagnostic-reports/ 目标设备实机报告运行数据，不提交（结论沉淀在 docs/）。
+#   - certs/、*.pem  本地 HTTPS 测试证书，含私钥，绝不提交。
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.pytest-*
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# 前端构建输出
+static/
+frontend/test-results/
+frontend/playwright-report/
+
+# 运行数据
+/data/
+diagnostic-reports/
+backend/data/
+port.txt
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+jwt_secret
+
+# 环境变量与密钥
+.env
+.env.*
+certs/
+*.pem
+
+# IDE
+.vscode/
+.idea/
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 构建产物
+dist/
+build/
+.toolchains/
+dist_pyinstaller/
+*.spec.bak
+reference-captures/
+
+# 压缩包
+*.zip
+
+# 本地开发资源与上游缓存
+参考资料/
+
+# 其他工具缓存与临时文件
+.reasonix/
+*.log
+.tmp/
+test-tmp-*/
+.claude
+.obsidian
+.playwright-mcp/
+.superpowers

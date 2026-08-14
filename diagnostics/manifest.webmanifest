@@ -1,0 +1,10 @@
+{
+  "name": "KRKR2 WebView 设备能力检测",
+  "short_name": "KRKR2 检测",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#101416",
+  "theme_color": "#101416"
+}

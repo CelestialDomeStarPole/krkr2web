@@ -1,0 +1,42 @@
+name: D2 downloader
+
+on:
+  push:
+    paths:
+      - "probes/d2-downloader/**"
+      - "tools/generate_d2_catalog.py"
+      - "tools/check_d2_artifacts.py"
+      - "tools/https_diagnostics_server.py"
+      - "tests/test_d2_tools.py"
+      - ".github/workflows/d2-downloader.yml"
+  pull_request:
+    paths:
+      - "probes/d2-downloader/**"
+      - "tools/generate_d2_catalog.py"
+      - "tools/check_d2_artifacts.py"
+      - "tools/https_diagnostics_server.py"
+      - "tests/test_d2_tools.py"
+      - ".github/workflows/d2-downloader.yml"
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check JavaScript syntax
+        shell: pwsh
+        run: |
+          node --check probes/d2-downloader/web/storage.js
+          node --check probes/d2-downloader/web/downloader.js
+          node --check probes/d2-downloader/web/app.js
+      - name: Check Python syntax and D2 tools
+        shell: pwsh
+        run: |
+          python -m py_compile tools/https_diagnostics_server.py tools/generate_d2_catalog.py tools/check_d2_artifacts.py tests/test_d2_tools.py
+          python -m unittest tests.test_d2_tools -v

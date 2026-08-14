@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-08-12",
+  "localCacheRoot": "参考资料/开源项目",
+  "repositories": [
+    {
+      "name": "krkr2",
+      "url": "https://github.com/2468785842/krkr2.git",
+      "branch": "main",
+      "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
+      "submodules": []
+    },
+    {
+      "name": "kirikiroid2-web",
+      "url": "https://github.com/fenghengzhi/kirikiroid2-web.git",
+      "branch": "web",
+      "commit": "338d2029f16969b84becfd163c67f99740e28296",
+      "submodules": [
+        {
+          "path": "cpp/plugins/layerExImage",
+          "url": "https://github.com/fenghengzhi/layerExImage.git",
+          "commit": "23a9214f9b6e9bc3267b964707efa269c041b919"
+        }
+      ]
+    },
+    {
+      "name": "krkrsdl2",
+      "url": "https://github.com/krkrsdl2/krkrsdl2.git",
+      "branch": "main",
+      "commit": "3f384a6869f6726929c777bdd0e0c871d5d5383d",
+      "submodules": [
+        {
+          "path": "external/FAudio",
+          "url": "https://github.com/FNA-XNA/FAudio.git",
+          "commit": "e787ed76558db49927e2cce6f08735b93870bb16"
+        },
+        {
+          "path": "external/SDL",
+          "url": "https://github.com/libsdl-org/SDL.git",
+          "commit": "53dea9830964eee8b5c2a7ee0a65d6e268dc78a1"
+        },
+        {
+          "path": "external/krkrz",
+          "url": "https://github.com/krkrsdl2/krkrz.git",
+          "commit": "b11c43a07543756fcb943a60ff0a949a7f470f10"
+        },
+        {
+          "path": "external/krkrz/external/angle",
+          "url": "https://github.com/krkrz/angle.git",
+          "commit": "f82b1b4dc548dc8325ec83c11cd2363f3656a894"
+        },
+        {
+          "path": "external/krkrz/external/baseclasses",
+          "url": "https://github.com/uyjulian/baseclasses.git",
+          "commit": "c9eb658930486c9e6c6603722b189734ce51e190"
+        },
+        {
+          "path": "external/krkrz/external/freetype",
+          "url": "https://github.com/krkrz/freetype.git",
+          "commit": "09d514321424e5ddf30f3dc84a559efaa6c99415"
+        },
+        {
+          "path": "external/krkrz/external/glm",
+          "url": "https://github.com/krkrz/glm.git",
+          "commit": "5dcc56489e1b66dfd5bca751fa9b8dc68059e008"
+        },
+        {
+          "path": "external/krkrz/external/jxrlib",
+          "url": "https://github.com/uyjulian/jxrlib.git",
+          "commit": "392d1c390607e673007633bdd68c3715c9e1fc0d"
+        },
+        {
+          "path": "external/krkrz/external/libjpeg-turbo",
+          "url": "https://github.com/krkrz/libjpeg-turbo.git",
+          "commit": "70e1c3cee7bdf32dee7ec8d874fb0bd8be37862e"
+        },
+        {
+          "path": "external/krkrz/external/libogg",
+          "url": "https://github.com/krkrz/libogg.git",
+          "commit": "17c16b0d0f319eb9d9aed6732eb4580902697223"
+        },
+        {
+          "path": "external/krkrz/external/lpng",
+          "url": "https://github.com/krkrz/libpng.git",
+          "commit": "5ed2d0a148e477534871b5d99ec790518afdf689"
+        },
+        {
+          "path": "external/krkrz/external/onig",
+          "url": "https://github.com/krkrz/oniguruma.git",
+          "commit": "2175d162b5d3d37b776edc8f2ab623bcf67e1b89"
+        },
+        {
+          "path": "external/krkrz/external/opus",
+          "url": "https://github.com/krkrz/opus.git",
+          "commit": "4f7980ccf0d7931700dd882630007c1fb8038ec4"
+        },
+        {
+          "path": "external/krkrz/external/opusfile",
+          "url": "https://github.com/krkrz/opusfile.git",
+          "commit": "f1448619271143099b3c283626a6bed9767308c3"
+        },
+        {
+          "path": "external/krkrz/external/zlib",
+          "url": "https://github.com/krkrz/zlib.git",
+          "commit": "7b1a58fd86abea257e1a91b202a0b34b5986b96c"
+        },
+        {
+          "path": "external/meson_toolchains",
+          "url": "https://github.com/krkrsdl2/meson_toolchains.git",
+          "commit": "10c83e8aee101382925d29e14bb8b8c683afd71b"
+        },
+        {
+          "path": "external/simde",
+          "url": "https://github.com/simd-everywhere/simde.git",
+          "commit": "dd0b662fd8cf4b1617dbbb4d08aa053e512b08e4"
+        },
+        {
+          "path": "external/simde/test/munit",
+          "url": "https://github.com/nemequ/munit.git",
+          "commit": "da8f73412998e4f1adf1100dc187533a51af77fd"
+        },
+        {
+          "path": "external/zlib",
+          "url": "https://github.com/madler/zlib.git",
+          "commit": "cacf7f1d4e3d44d871b605da3b647f07d718623f"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "emsdk": {
+    "version": "3.1.64",
+    "repository": "https://github.com/emscripten-core/emsdk.git",
+    "commit": "0b3bcbc3b005cbb811d48e497eabcc6846d43001",
+    "releasesCommit": "fd61bacaf40131f74987e649a135f1dd559aff60",
+    "nodePackage": "node-18.20.3-64bit"
+  },
+  "target": {
+    "browser": "Chromium",
+    "minimumMajorVersion": 89,
+    "wasmBits": 32,
+    "initialMemoryBytes": 33554432,
+    "maximumMemoryBytes": 536870912,
+    "wasmBigInt": true
+  },
+  "forbiddenFeatures": [
+    "atomics",
+    "exception-handling",
+    "gc",
+    "memory64",
+    "reference-types",
+    "relaxed-simd",
+    "simd128",
+    "tail-call",
+    "threads"
+  ]
+}

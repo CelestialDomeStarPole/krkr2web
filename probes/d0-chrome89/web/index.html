@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>KRKR2 Web D0 构建探针</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">KRKR2 WEB / D0</p>
+        <h1>Chrome 89 构建探针</h1>
+      </div>
+      <span id="overall-badge" class="badge badge-running">检测中</span>
+    </header>
+
+    <section class="summary-band" aria-labelledby="summary-title">
+      <div>
+        <h2 id="summary-title">构建基线</h2>
+        <p id="summary-text">正在载入 Wasm 并验证运行环境。</p>
+      </div>
+      <dl class="build-meta">
+        <div><dt>构建版本</dt><dd id="build-version">读取中</dd></div>
+        <div><dt>编译器</dt><dd id="compiler-version">读取中</dd></div>
+        <div><dt>目标内核</dt><dd>Chromium 89</dd></div>
+      </dl>
+    </section>
+
+    <div class="content-grid">
+      <section class="results-panel" aria-labelledby="results-title">
+        <div class="section-heading">
+          <h2 id="results-title">检测结果</h2>
+          <span id="progress-text">0 / 0</span>
+        </div>
+        <ol id="results-list" class="results-list" aria-live="polite"></ol>
+      </section>
+
+      <section class="render-panel" aria-labelledby="render-title">
+        <div class="section-heading">
+          <h2 id="render-title">WebGL 2 输出</h2>
+          <span id="fps-value">等待</span>
+        </div>
+        <canvas id="render-canvas" width="640" height="360"></canvas>
+        <p id="runtime-details" class="runtime-details">尚未开始运行。</p>
+      </section>
+    </div>
+
+    <section class="actions-band" aria-label="报告操作">
+      <button id="rerun-button" type="button">重新检测</button>
+      <button id="upload-button" class="primary-button" type="button" disabled>上传测试结果</button>
+      <p id="upload-status" role="status"></p>
+    </section>
+  </main>
+
+  <script src="./d0-module.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

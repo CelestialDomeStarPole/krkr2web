@@ -1,0 +1,36 @@
+name: D0 Chrome 89 baseline
+
+on:
+  push:
+    paths:
+      - "probes/d0-chrome89/**"
+      - "toolchains/d0-toolchain.lock.json"
+      - "tools/build_d0.sh"
+      - "tools/check_d0_artifacts.py"
+      - "tools/setup_d0_toolchain.sh"
+      - ".github/workflows/d0-chrome89.yml"
+  pull_request:
+    paths:
+      - "probes/d0-chrome89/**"
+      - "toolchains/d0-toolchain.lock.json"
+      - "tools/build_d0.sh"
+      - "tools/check_d0_artifacts.py"
+      - "tools/setup_d0_toolchain.sh"
+      - ".github/workflows/d0-chrome89.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KRKR2_EMSDK_DIR: ${{ runner.temp }}/emsdk
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install locked Emscripten toolchain
+        run: tools/setup_d0_toolchain.sh
+      - name: Build and check D0 probe
+        run: tools/build_d0.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d0-chrome89-probe
+          path: build/d0-chrome89

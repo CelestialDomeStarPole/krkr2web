@@ -1,0 +1,60 @@
+diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive.cpp
+index 19b09ec..ea98c1b 100644
+--- a/external/krkrz/base/XP3Archive.cpp
++++ b/external/krkrz/base/XP3Archive.cpp
+@@ -394,19 +394,28 @@ tTVPXP3Archive::tTVPXP3Archive(const ttstr & name) : tTVPArchive(name)
+ 
+ 					unsigned long destlen = (unsigned long)index_size;
+ 
++#ifdef __EMSCRIPTEN__
++					TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_XP3_INDEX_INPUT compressed=")) +
++						ttstr((tjs_int)compressed_size) + TJS_W(" expanded=") + ttstr((tjs_int)index_size) +
++						TJS_W(" first=") + ttstr((tjs_int)compressed[0]) +
++						TJS_W(" last=") + ttstr((tjs_int)compressed[compressed_size - 1]));
++#endif
+ 					int result = uncompress(  /* uncompress from zlib */
+ 						(unsigned char *)indexdata,
+ 						&destlen, (unsigned char*)compressed,
+ 							(unsigned long)compressed_size);
+ 					if(result != Z_OK ||
+ 						destlen != (unsigned long)index_size)
+ 							TVPThrowExceptionMessage(TVPUncompressionFailed);
+ 				}
+ 				catch(...)
+ 				{
+ 					delete [] compressed;
+ 					throw;
+ 				}
+ 				delete [] compressed;
++#ifdef __EMSCRIPTEN__
++				TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_XP3_INDEX_EXPANDED ")) + ttstr((tjs_int)index_size));
++#endif
+ 			}
+ 			else if((index_flag & TVP_XP3_INDEX_ENCODE_METHOD_MASK) ==
+@@ -523,8 +532,12 @@ tTVPXP3Archive::tTVPXP3Archive(const ttstr & name) : tTVPArchive(name)
+ 				// to next file
+ 				ch_file_start += ch_file_size;
+ 				ch_file_size = index_size - ch_file_start;
+ 				Count++;
++#ifdef __EMSCRIPTEN__
++				if((Count % 5000) == 0)
++					TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_XP3_INDEX_ENTRIES ")) + ttstr(Count));
++#endif
+ 			}
+ 
+ 			if(!(index_flag & TVP_XP3_INDEX_CONTINUE))
+ 				break; // continue reading index when the bit sets
+@@ -531,7 +544,13 @@ tTVPXP3Archive::tTVPXP3Archive(const ttstr & name) : tTVPArchive(name)
+ 		}
+ 
+ 		// sort item vector by its name (required for tTVPArchive specification)
++#ifdef __EMSCRIPTEN__
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_XP3_INDEX_SORT_BEGIN ")) + ttstr(Count));
++#endif
+ 		std::stable_sort(ItemVector.begin(), ItemVector.end());
++#ifdef __EMSCRIPTEN__
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_XP3_INDEX_SORT_END ")) + ttstr(Count));
++#endif
+ 	}
+ 	catch(...)
+ 	{

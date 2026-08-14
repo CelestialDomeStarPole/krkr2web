@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>KRKR2 Web D2 游戏下载验证</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">KRKR2 WEB / D2</p>
+        <h1>游戏下载与缓存验证</h1>
+      </div>
+      <span id="overall-badge" class="badge badge-idle">正在读取</span>
+    </header>
+
+    <section class="summary-band" aria-labelledby="game-title">
+      <div>
+        <h2 id="game-title">正在读取游戏目录</h2>
+        <p id="summary-text">本页会把服务端配置的游戏完整保存到设备，并验证暂停、继续、坏块修复和删除。</p>
+      </div>
+      <dl class="build-meta">
+        <div><dt>资源总量</dt><dd id="total-size">--</dd></div>
+        <div><dt>资源包</dt><dd id="package-count">--</dd></div>
+        <div><dt>并发与分块</dt><dd>2 路 / 4 MiB</dd></div>
+      </dl>
+    </section>
+
+    <section class="progress-band" aria-label="下载进度">
+      <div class="progress-track" aria-hidden="true"><span id="progress-fill"></span></div>
+      <div class="progress-copy">
+        <strong id="progress-title">正在初始化</strong>
+        <span id="progress-detail">请稍候。</span>
+      </div>
+    </section>
+
+    <div class="content-grid">
+      <section class="results-panel" aria-labelledby="results-title">
+        <div class="section-heading">
+          <h2 id="results-title">阶段结果</h2>
+          <span id="result-count">0 / 9</span>
+        </div>
+        <ol id="results-list" class="results-list" aria-live="polite"></ol>
+      </section>
+
+      <section class="metrics-panel" aria-labelledby="metrics-title">
+        <div class="section-heading">
+          <h2 id="metrics-title">传输与内存边界</h2>
+          <span id="status-value">未安装</span>
+        </div>
+        <dl class="metrics-grid">
+          <div><dt>已安全保存</dt><dd id="saved-value">--</dd></div>
+          <div><dt>网络传输</dt><dd id="network-value">--</dd></div>
+          <div><dt>请求次数</dt><dd id="requests-value">--</dd></div>
+          <div><dt>最大并发</dt><dd id="concurrency-value">--</dd></div>
+          <div><dt>同时处理上限</dt><dd id="inflight-value">--</dd></div>
+          <div><dt>坏块重下</dt><dd id="repair-value">--</dd></div>
+        </dl>
+        <p id="runtime-details" class="runtime-details">设备和空间信息将在清单读取后显示。</p>
+      </section>
+    </div>
+
+    <section class="actions-band" aria-label="验证操作">
+      <button id="start-button" class="primary-button" type="button" disabled>开始完整下载</button>
+      <button id="pause-button" type="button" disabled>暂停</button>
+      <button id="verify-button" type="button" disabled>重新完整校验</button>
+      <button id="tamper-button" type="button" disabled>模拟一个坏块</button>
+      <button id="repair-button" type="button" disabled>修复坏块</button>
+      <button id="delete-button" class="danger-button" type="button" disabled>删除游戏数据</button>
+      <button id="upload-button" type="button" disabled>上传测试结果</button>
+      <p id="action-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="guide-band" aria-labelledby="guide-title">
+      <div class="section-heading">
+        <h2 id="guide-title">实机验证顺序</h2>
+        <span>可分多次完成</span>
+      </div>
+      <ol>
+        <li>开始下载；中途点一次“暂停”，也可以关闭 App 或断开网络。</li>
+        <li>重新打开本页并继续，直到显示“可用”。</li>
+        <li>依次点“模拟一个坏块”和“修复坏块”，确认只重下一块。</li>
+        <li>上传报告。需要验证空间回收时，再删除游戏数据并再次上传。</li>
+      </ol>
+    </section>
+  </main>
+
+  <script src="./storage.js"></script>
+  <script src="./downloader.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

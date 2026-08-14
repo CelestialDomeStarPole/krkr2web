@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <link rel="icon" href="data:,">
+  <title>KRKR2 D3 交互验证</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-state="idle">
+  <main>
+    <section class="toolbar">
+      <div>
+        <p class="eyebrow">D3 ENGINE GATE</p>
+        <h1>KRKR2 最小交互验证</h1>
+      </div>
+      <div class="actions">
+        <button id="start-button" type="button">启动引擎</button>
+        <button id="soak-button" class="secondary" type="button" disabled>开始稳定性测试</button>
+        <a id="reload-button" class="button secondary" href="/?gameId=d3-test&amp;restart=1" target="_self" hidden>重开验存档</a>
+        <button id="upload-button" class="secondary" type="button">上传报告</button>
+      </div>
+    </section>
+    <section class="workspace">
+      <div class="stage"><canvas id="canvas" tabindex="-1"></canvas></div>
+      <aside>
+        <p class="label">当前状态</p>
+        <h2 id="status">等待启动</h2>
+        <p id="detail">将先检查测试包，再启动引擎。</p>
+        <dl>
+          <dt>游戏</dt><dd id="game-id">--</dd>
+          <dt>XP3 内存缓存</dt><dd id="cache-value">0.00 MiB</dd>
+          <dt>目标上限</dt><dd>16 MiB</dd>
+          <dt>稳定性累计</dt><dd id="soak-progress">00:00 / 30:00</dd>
+          <dt>引擎心跳</dt><dd id="soak-heartbeat">等待引擎</dd>
+          <dt>测试分段</dt><dd id="soak-segments">0 段</dd>
+        </dl>
+      </aside>
+    </section>
+  </main>
+  <script src="installer-storage.js"></script>
+  <script src="installer.js"></script>
+  <script src="storage.js"></script>
+  <script src="krkrsdl2.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

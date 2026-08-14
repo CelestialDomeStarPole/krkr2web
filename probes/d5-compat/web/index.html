@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>D5 Compatibility Probe</title>
+  <link rel="stylesheet" href="/compat/styles.css">
+</head>
+<body>
+  <header>
+    <div><strong>D5 COMPAT</strong><span>千恋万花</span></div>
+    <button id="start" type="button">启动探针</button>
+  </header>
+  <main>
+    <section class="stage">
+      <canvas id="canvas" tabindex="-1"></canvas>
+      <div id="status" class="status">等待启动</div>
+    </section>
+    <aside>
+      <dl>
+        <div><dt>配置</dt><dd id="profile">senren-banka-v1</dd></div>
+        <div><dt>网络读取</dt><dd id="bytes">0 B</dd></div>
+        <div><dt>块缓存</dt><dd id="cache">0 / 4</dd></div>
+        <div><dt>Wasm 内存</dt><dd id="memory">--</dd></div>
+        <div><dt>最后读取</dt><dd id="read">--</dd></div>
+        <div><dt>首个错误</dt><dd id="error">无</dd></div>
+      </dl>
+      <pre id="log" aria-live="polite"></pre>
+    </aside>
+  </main>
+  <script src="/engine-profiles.js"></script>
+  <script src="/engine/krkrsdl2.js"></script>
+  <script src="/compat/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101416">
+  <title>KRKR2 WebView 检测</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">KRKR2 / WEBVIEW 89</p>
+      <h1>设备能力检测</h1>
+    </div>
+    <div class="overall" id="overall" data-state="idle">
+      <span class="overall-dot" aria-hidden="true"></span>
+      <span id="overallText">等待检测</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary-band">
+      <div class="summary-copy">
+        <p id="summaryText">检测浏览器缓存、离线运行、共享内存、图形、音视频和输入能力。</p>
+        <p class="quiet" id="originText"></p>
+      </div>
+      <div class="action-area">
+        <div class="actions">
+          <button class="button primary" id="runButton" type="button">开始检测</button>
+          <button class="button" id="copyButton" type="button" disabled>复制报告</button>
+          <button class="button" id="uploadButton" type="button" disabled>上传报告</button>
+        </div>
+        <p class="upload-status" id="uploadStatus" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="metrics" aria-label="检测摘要">
+      <div class="metric">
+        <span>核心能力</span>
+        <strong id="coreMetric">--</strong>
+      </div>
+      <div class="metric">
+        <span>站点配额</span>
+        <strong id="quotaMetric">--</strong>
+      </div>
+      <div class="metric">
+        <span>缓存写入</span>
+        <strong id="writeMetric">--</strong>
+      </div>
+      <div class="metric">
+        <span>图形接口</span>
+        <strong id="graphicsMetric">--</strong>
+      </div>
+    </section>
+
+    <section class="test-section">
+      <div class="section-heading">
+        <h2>检测项目</h2>
+        <span id="progressText">0 / 0</span>
+      </div>
+      <div class="test-list" id="testList"></div>
+    </section>
+
+    <section class="stress-section">
+      <div class="section-heading">
+        <div>
+          <h2>存储压力测试</h2>
+          <p class="quiet">只在你点击后执行。测试数据使用独立数据库，结束或取消后会删除。</p>
+        </div>
+        <span class="badge neutral" id="stressState">未运行</span>
+      </div>
+      <div class="stress-controls">
+        <label for="stressSize">测试大小</label>
+        <select id="stressSize">
+          <option value="64">64 MB（首次测试）</option>
+          <option value="512">512 MB</option>
+          <option value="1024">1 GB（重启保留测试）</option>
+          <option value="5120">5 GB（最终配额测试）</option>
+        </select>
+        <button class="button warning" id="stressButton" type="button">运行压力测试</button>
+        <button class="icon-button" id="cancelStressButton" type="button" title="取消测试" aria-label="取消测试" disabled>×</button>
+      </div>
+      <div class="progress-track" aria-hidden="true"><span id="stressProgress"></span></div>
+      <p class="stress-detail" id="stressDetail">建议先完成上方自动检测。</p>
+    </section>
+
+    <section class="report-section">
+      <div class="section-heading">
+        <h2>报告</h2>
+        <span class="quiet">请将完整内容发给开发者</span>
+      </div>
+      <textarea id="report" readonly spellcheck="false" aria-label="检测报告">尚未生成报告。</textarea>
+    </section>
+  </main>
+
+  <footer>
+    <span>检测页不会读取游戏资源；只有点击“上传报告”才会发送当前检测结果。</span>
+    <span id="buildVersion">build dev</span>
+  </footer>
+
+  <script src="/app.js?v=2026-08-12.8"></script>
+</body>
+</html>

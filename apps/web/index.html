@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#15191d">
+  <link rel="icon" href="data:,">
+  <title>KRKR2 Web</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <strong>KRKR2 WEB</strong>
+      <span id="network-label">正在连接</span>
+    </div>
+    <nav class="tabs" aria-label="主要页面">
+      <button class="tab active" type="button" data-view="library">游戏库</button>
+      <button class="tab" type="button" data-view="downloads">下载</button>
+      <button class="tab" type="button" data-view="settings">设置</button>
+    </nav>
+    <div class="storage-summary" aria-label="站点存储">
+      <span>本机存储</span>
+      <strong id="storage-usage">--</strong>
+    </div>
+  </header>
+
+  <main id="product-main">
+    <section id="library-view" class="view active" data-view-panel="library">
+      <div class="library-list">
+        <div class="section-heading">
+          <div><p>LIBRARY</p><h1>游戏库</h1></div>
+          <span id="catalog-status" class="status-pill">读取中</span>
+        </div>
+        <div id="game-list" class="game-list" aria-live="polite"></div>
+      </div>
+      <aside id="game-detail" class="game-detail" aria-live="polite">
+        <div class="empty-state">
+          <strong>正在读取游戏目录</strong>
+          <span>--</span>
+        </div>
+      </aside>
+    </section>
+
+    <section id="downloads-view" class="view" data-view-panel="downloads" hidden>
+      <div class="single-column">
+        <div class="section-heading"><div><p>DOWNLOADS</p><h1>下载管理</h1></div></div>
+        <div id="download-list" class="download-list"></div>
+      </div>
+    </section>
+
+    <section id="settings-view" class="view" data-view-panel="settings" hidden>
+      <div class="single-column settings-column">
+        <div class="section-heading"><div><p>DEVICE</p><h1>设备与离线</h1></div></div>
+        <dl class="settings-list">
+          <div><dt>同页离线</dt><dd id="offline-ready-status">准备中</dd></div>
+          <div><dt>资源存储</dt><dd>IndexedDB · 4 MiB 分块</dd></div>
+          <div><dt>默认操作</dt><dd id="input-mode">触摸</dd></div>
+          <div><dt>引擎模式</dt><dd>单线程 · 64 MiB 初始内存</dd></div>
+          <div><dt>内核</dt><dd id="runtime-version">Chrome --</dd></div>
+        </dl>
+        <div class="settings-actions">
+          <button id="upload-diagnostics" class="secondary" type="button">上传诊断</button>
+          <span id="diagnostics-status"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section id="player-view" class="embedded-player" aria-label="游戏画面" hidden>
+    <header class="player-bar">
+      <button id="player-back-button" class="icon-button" type="button" title="返回游戏库" aria-label="返回游戏库">←</button>
+      <strong id="game-title">正在启动</strong>
+      <span id="save-status">读取存档</span>
+    </header>
+    <div class="player-stage">
+      <canvas id="canvas" tabindex="-1"></canvas>
+      <div id="player-loading-panel" class="player-loading-panel">
+        <strong id="player-status">正在检查本机资源</strong>
+        <span id="player-detail">只会启动已经完整校验的游戏。</span>
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="/storage.js"></script>
+  <script src="/downloader.js"></script>
+  <script src="/play/storage.js"></script>
+  <script src="/engine-profiles.js"></script>
+  <script src="/engine/krkrsdl2.js"></script>
+  <script src="/player.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

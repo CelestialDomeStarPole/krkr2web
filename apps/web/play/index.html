@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#050607">
+  <link rel="icon" href="data:,">
+  <title>KRKR2 Web Player</title>
+  <link rel="stylesheet" href="/play/styles.css">
+</head>
+<body data-state="loading">
+  <header class="player-bar">
+    <a class="icon-button" href="/" title="返回游戏库" aria-label="返回游戏库">←</a>
+    <strong id="game-title">正在启动</strong>
+    <div class="player-actions">
+      <span id="save-status">读取存档</span>
+      <button id="restart-button" class="icon-button" type="button" title="重新启动游戏" aria-label="重新启动游戏">↻</button>
+    </div>
+  </header>
+  <main class="stage">
+    <canvas id="canvas" tabindex="-1"></canvas>
+    <div id="loading-panel" class="loading-panel">
+      <strong id="status">正在检查本机资源</strong>
+      <span id="detail">只会启动已经完整校验的游戏。</span>
+    </div>
+  </main>
+  <script src="/play/storage.js"></script>
+  <script src="/engine-profiles.js"></script>
+  <script src="/engine/krkrsdl2.js"></script>
+  <script src="/play/app.js"></script>
+</body>
+</html>

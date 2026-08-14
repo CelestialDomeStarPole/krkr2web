@@ -1,0 +1,17 @@
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -791,13 +791,6 @@ void SDLApplication::Initialize(int argc, tjs_char **argv)
+ 	{
+ 		TVPThrowExceptionMessage(TJS_W("Cannot create SDL window: %1"), ttstr(SDL_GetError()));
+ 	}
+-#if defined(__EMSCRIPTEN__) && defined(KRKRSDL2_WINDOW_SIZE_IS_LAYER_SIZE)
+-	EmscriptenFullscreenStrategy strategy;
+-	SDL_memset(&strategy, 0, sizeof(strategy));
+-	strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_STDDEF;
+-	strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
+-	emscripten_enter_soft_fullscreen("#canvas", &strategy);
+-#endif
+ #ifdef KRKRZ_ENABLE_CANVAS
+ 	this->context = nullptr;
+ 	if (!TVPIsEnableDrawDevice())
