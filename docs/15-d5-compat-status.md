@@ -167,3 +167,18 @@ System.getSystemLanguageTag。
 结论：NCB 框架近乎零成本可搬；每个插件仍需一层“字符串转换 + Storage API 适配”，
 这层适配是分摊成本，第一个插件（fstat）打通后即可复用。
 
+### fstat 编译验证（2026-08-14 更新）
+
+实测 fstat/main.cpp 已能对 krkrsdl2 编译通过，全部适配收敛为 4 项：
+
+1. ncbind.hpp 补 include <set>；
+2. fstat/main.cpp 补 include <sstream>；
+3. 约 30 行的无 fmt spdlog 桩；
+4. tTJSString 增加 tTJSString(const std::string&) 单行构造（走现有 tjs_nchar 窄串
+   构造，即 UTF-8 → UTF-16）。
+
+此前担心的 TVPNormalizeStorageName 差异实际是字符串构造失败引发的级联错误，
+补上第 4 项后自动消解（测试中该符号来自 krkr2 的 StorageImpl.h，真实构建仍需
+对照 krkrsdl2 的 Storage 接口确认）。下一步是把 NCB + fstat 正式接入引擎构建，
+并验证 Plugins.link("fstat.dll") 能注册出 fstat 类。
+
