@@ -178,9 +178,20 @@ sqscrmask.png 实为 WebP。已接入 libwebp + WebP 加载器 + magic 探测路
 layerExBtoA（wtnbgo，未克隆），且游戏在主循环中停止推进（XP3 读取无挂起，
 274/274 完成），疑似等待未达成的资源/渲染同步。
 
-残留可捕获异常：psdlayer.tjs 的 Scripts.clone(PSB 图层)（scriptsEx clone 对
-PSBValueDispatch 的 Array/Dictionary 分支处理问题，诊断显示 type=4 对象）、
-kag.setMessageHook（KAGParserEx，F10 键）。
+### 10. Scripts.clone/PSB 名称异常（已解决）
+
+根因是 PSB 名称解码产生无效 CP932 字节，`tTJSString` 窄→宽转换
+（`SetString` 的 `SJISToUnicodeString`）返回 -1 并抛“Cannot convert given narrow
+string to wide string”。已通过补丁 0031 把窄→宽转换宽容化（无效字节回退为
+逐字节 wide char），loadPIMG 异常解除。
+
+### 11. 主循环在跑但标题画面不渲染（当前主问题）
+
+帧计数诊断确认主循环存活（约 8 FPS，90 秒 720 帧），XP3 读取全部完成、
+点击/键盘无响应、画布 54 色基本空白。游戏停在 boot 后的标题场景初始化：
+first.ks → first.init/first.logo syshook → title.ks（Override.tjs/exroll.tjs 链）。
+疑似依赖仍在 NOOP 的插件：extrans/extNagano（转场）、layerExDraw/Raster/BtoA
+（图层扩展）、AlphaMovie（logo 视频）。kag.setMessageHook（KAGParserEx）仍被捕获。
 
 ## 下一步
 
