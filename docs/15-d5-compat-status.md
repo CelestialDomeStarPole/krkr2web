@@ -193,6 +193,14 @@ first.ks → first.init/first.logo syshook → title.ks（Override.tjs/exroll.tj
 疑似依赖仍在 NOOP 的插件：extrans/extNagano（转场）、layerExDraw/Raster/BtoA
 （图层扩展）、AlphaMovie（logo 视频）。kag.setMessageHook（KAGParserEx）仍被捕获。
 
+### 12. 剩余插件源已定位（kirikiroid2-web 全量）
+
+kirikiroid2-web/cpp/plugins 含全部剩余插件。已移植 layerExRaster + layerExBTOA +
+PackinOne（补丁 0032，PackinOne 批量加载 8 子插件含这俩）。extrans（mosaic/
+ripple/rotate/turn/wave）依赖 kirikiroid2-web 的 RenderManager（iTVPRenderManager/
+iTVPTexture2D），krkrsdl2 无此层（只有 Layer::OperateRect/tTVPBaseBitmap），需适配。
+layerex_draw/general 后端为 libgdiplus。extNagano 不在其中（游戏特有，待查）。
+
 ## 下一步
 
 按 ADR-008 从 krkr2 真移植 NCB 框架与插件（不再手写 TJS 桩）：
