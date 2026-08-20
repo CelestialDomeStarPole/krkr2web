@@ -1,0 +1,39 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -177,3 +177,4 @@ list(APPEND KRKRSDL2COMMON_SRC
+ 	external/krkrz/plugin/getSample.cpp
+ 	external/krkrz/plugin/scriptsEx.cpp
++	external/krkrz/plugin/windowEx.cpp
+ 	external/krkrz/plugin/BinaryAccessor.cpp
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -1204,12 +1204,11 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+ 	}
+ 	else if(name == TJS_W("windowEx.dll"))
+ 	{
+-		TVPExecuteScript(
+-			TJS_W("if (typeof Window.getNotificationNum == 'undefined') Window.getNotificationNum = function(msg) { return 0; };")
+-			TJS_W("if (typeof Window.setDispMode == 'undefined') Window.setDispMode = function(mode) { return 0; };"),
+-			TJS_W("krkr2web-windowex-shim"), 0);
+-		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM windowEx.dll"));
++		if(loadNCBModule(name))
++			TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_NCB windowEx.dll"));
++		else
++			TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_NOOP windowEx.dll"));
+ 	}
+ 	else if(name == TJS_W("getLangName.dll"))
+ 	{
+diff --git a/external/krkrz/plugin/windowEx.cpp b/external/krkrz/plugin/windowEx.cpp
+--- a/external/krkrz/plugin/windowEx.cpp
++++ b/external/krkrz/plugin/windowEx.cpp
+@@ -1455,7 +1455,7 @@ struct System {
+         ttstr key(p[0]->AsStringNoAddRef());
+         if(key == TJS_W(""))
+             return TJS_E_INVALIDPARAM;
+-        key.ToUpperCase();
++        key = key.AsUpperCase();
+ 
+         tTJSVariant tmp;
+         iTJSDispatch2 *obj = TVPGetScriptDispatch();

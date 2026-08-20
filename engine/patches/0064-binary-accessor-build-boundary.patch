@@ -1,0 +1,28 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -182,7 +182,6 @@
+ 	external/krkrz/plugin/psbfile/PSBRawFile.cpp
+ 	external/krkrz/plugin/psbfile/PSBMedia.cpp
+ 	external/krkrz/plugin/psbfile/PSBMediaRegistry.cpp
+-	external/krkrz/plugin/xp3filter.cpp
+ 	external/krkrz/plugin/saveStruct.cpp
+ 	external/krkrz/plugin/textrender/TextRender.cpp
+ 	external/krkrz/plugin/layerExImage/LayerExImage.cpp
+@@ -198,7 +197,6 @@
+ )
+ list(APPEND KRKR2WEB_CXX17_PLUGIN_SRC
+ 	"${CMAKE_CURRENT_SOURCE_DIR}/external/krkrz/plugin/BinaryAccessor.cpp"
+-	"${CMAKE_CURRENT_SOURCE_DIR}/external/krkrz/plugin/xp3filter.cpp"
+ )
+ set_source_files_properties(${KRKR2WEB_CXX17_PLUGIN_SRC}
+ 	PROPERTIES COMPILE_OPTIONS "-std=gnu++17" SKIP_PRECOMPILE_HEADERS ON
+diff --git a/external/krkrz/plugin/BinaryAccessor.cpp b/external/krkrz/plugin/BinaryAccessor.cpp
+--- a/external/krkrz/plugin/BinaryAccessor.cpp
++++ b/external/krkrz/plugin/BinaryAccessor.cpp
+@@ -1,3 +1,5 @@
++#include "tjsCommHead.h"
++#include "tjsHashSearch.h"
+ #include "xp3filter.h"
+ 
+ #include <cstdint>

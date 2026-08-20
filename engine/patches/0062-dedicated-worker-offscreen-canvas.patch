@@ -1,0 +1,8 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -329,3 +329,4 @@ list(APPEND KRKRSDL2_LDFLAGS
+ 	-sMIN_CHROME_VERSION=89
+ 	-sENVIRONMENT=${KRKRSDL2_EMSCRIPTEN_ENVIRONMENT}
++	-sOFFSCREENCANVAS_SUPPORT=1
+ 	-sDYNAMIC_EXECUTION=0

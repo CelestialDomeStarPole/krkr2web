@@ -13,7 +13,7 @@ The D3 browser build deliberately uses:
 
 - one Wasm/main-thread runtime, without pthreads or SharedArrayBuffer;
 - Asyncify for synchronous KRKR2 calls that wait on IndexedDB;
-- Chrome 89 `DecompressionStream` for XP3 indices and compressed resource segments;
+- cancellable Web Worker inflate for XP3 indices and compressed resource segments, keeping the browser UI responsive;
 - the D2 `krkr2web` database for immutable XP3 chunks;
 - Emscripten IDBFS mounted at `/savedata/<gameId>` for mutable saves;
 - a four-entry, 4 MiB-per-entry XP3 LRU cache.

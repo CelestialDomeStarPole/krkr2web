@@ -1,0 +1,31 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -42,6 +42,7 @@
+ option(KRKRSDL2_EMSCRIPTEN_ENABLE_THREADS "Enable threads for the Emscripten build." OFF)
+ option(KRKRSDL2_EMSCRIPTEN_ENABLE_SOURCE_MAPS "Enable threads for the Emscripten build." OFF)
+ set(KRKRSDL2_EMSCRIPTEN_INITIAL_MEMORY "134217728" CACHE STRING "Initial memory usage for the Emscripten build.")
++set(KRKRSDL2_EMSCRIPTEN_EXPORT_NAME "instantiate_krkrsdl2_module" CACHE STRING "JavaScript module factory name for the Emscripten build.")
+ option(KRKRSDL2_BUILD_ENABLE_WARNINGS "Enable warnings when building the project." OFF)
+ 
+@@ -306,6 +307,12 @@
+ )
+ 
+ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
++set(KRKRSDL2_EMSCRIPTEN_RUNTIME_METHODS "['FS','IDBFS','addRunDependency','removeRunDependency']")
++if(${KRKRSDL2_EMSCRIPTEN_ENABLE_THREADS} EQUAL ON)
++set(KRKRSDL2_EMSCRIPTEN_RUNTIME_METHODS "['FS','IDBFS','addRunDependency','removeRunDependency','PThread']")
++endif()
++
+ list(APPEND KRKRSDL2_LDFLAGS
+ 	-sDISABLE_EXCEPTION_CATCHING=0
+@@ -326,8 +333,8 @@
+ 	-sSTACK_SIZE=1048576
+ 	-sSTACK_OVERFLOW_CHECK=0
+ 	-sMODULARIZE=1
+-	-sEXPORT_NAME="instantiate_krkrsdl2_module"
+-	-sEXPORTED_RUNTIME_METHODS=['FS','IDBFS','addRunDependency','removeRunDependency']
++	-sEXPORT_NAME="${KRKRSDL2_EMSCRIPTEN_EXPORT_NAME}"
++	-sEXPORTED_RUNTIME_METHODS=${KRKRSDL2_EMSCRIPTEN_RUNTIME_METHODS}
+ 	-sUSE_SDL=2
+ 	-sUSE_VORBIS=1

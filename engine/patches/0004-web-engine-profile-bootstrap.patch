@@ -2,7 +2,7 @@ diff --git a/src/core/environ/sdl2/Application.cpp b/src/core/environ/sdl2/Appli
 index 720f5af..258aad1 100644
 --- a/src/core/environ/sdl2/Application.cpp
 +++ b/src/core/environ/sdl2/Application.cpp
-@@ -437,4 +437,35 @@ const tjs_char * exception_to_str(EXCEPTION_POINTERS *ep)
+@@ -437,4 +437,28 @@ const tjs_char * exception_to_str(EXCEPTION_POINTERS *ep)
  
  #endif
 +#ifdef __EMSCRIPTEN__
@@ -25,20 +25,12 @@ index 720f5af..258aad1 100644
 +			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_AUTOPATH ")) + path);
 +		}
 +	}
-+
-+	if (TVPGetCommandLine(TJS_W("-krkr2web-motion-bootstrap")))
-+	{
-+		TVPExecuteScript(
-+			TJS_W("global.Motion = %[\"Player\" => %[\"useD3D\" => 0]];"),
-+			TJS_W("krkr2web-motion-bootstrap"), 0);
-+		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_BOOTSTRAP motionplayer.dll bootstrap-only"));
-+	}
 +}
 +#endif
 +
  bool tTVPApplication::StartApplication( int argc, tjs_char* argv[] ) {
  	// _set_se_translator(se_translator_function);
-@@ -483,6 +518,10 @@ bool tTVPApplication::StartApplication( int argc, tjs_char* argv[] ) {
+@@ -483,6 +511,10 @@ bool tTVPApplication::StartApplication( int argc, tjs_char* argv[] ) {
  
  		TVPSystemInit();
  

@@ -74,12 +74,20 @@ def main() -> None:
         (patch for patch in args.patch if patch.name == "0006-web-decompression-stream.patch"), None
     )
     if decompression_patch is None:
-        failures.append("engine patch set is missing the Chrome 89 XP3 decompression bridge")
+        failures.append("engine patch set is missing the XP3 decompression wrapper")
     else:
         decompression_text = decompression_patch.read_text(encoding="utf-8")
-        for token in ("DecompressionStream", "TVPXP3Uncompress", "KRKR2WEB_E_DECOMPRESSION_FAILED"):
+        for token in (
+            "TVPXP3Uncompress",
+            "EM_ASYNC_JS",
+            "DecompressionStream",
+            "new Worker",
+            "worker.terminate()",
+            "krkr2webAsyncTrace",
+            "timeout after 15000 ms",
+        ):
             if token not in decompression_text:
-                failures.append(f"XP3 decompression bridge is missing {token}")
+                failures.append(f"XP3 decompression wrapper is missing {token}")
 
     passed = not failures
     report = {

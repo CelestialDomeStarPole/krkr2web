@@ -1,0 +1,41 @@
+diff --git a/external/krkrz/base/KAGParser.cpp b/external/krkrz/base/KAGParser.cpp
+--- a/external/krkrz/base/KAGParser.cpp
++++ b/external/krkrz/base/KAGParser.cpp
+@@ -1424,6 +1424,7 @@ iTJSDispatch2 *tTJSNI_KAGParser::_GetNextTag() {
+     static ttstr __storage_name(TJSMapGlobalStringMap(TJS_W("storage")));
+     static ttstr __target_name(TJSMapGlobalStringMap(TJS_W("target")));
+     static ttstr __exp_name(TJSMapGlobalStringMap(TJS_W("exp")));
++    static ttstr __escape_name(TJSMapGlobalStringMap(TJS_W("escape")));
+ 
+     while(true) {
+         DicClear->FuncCall(0, nullptr, nullptr, nullptr, 0, nullptr, DicObj);
+@@ -1828,11 +1829,18 @@ iTJSDispatch2 *tTJSNI_KAGParser::_GetNextTag() {
+                             TVPExecuteExpression(exp, Owner, &val);
+                             exp = val;
+ 
++                            // KAGParserEx compatibility: escape=false lets an
++                            // expression inject tags instead of literal text.
++                            bool escape = true;
++                            val.Clear();
++                            DicObj->PropGet(0, __escape_name.c_str(),
++                                            __escape_name.GetHint(), &val, DicObj);
++                            if(val.Type() != tvtVoid) escape = val.operator bool();
++
+                             // count '['
+                             const tjs_char *p = exp.c_str();
+                             tjs_int r_count = 0;
+                             while(*p) {
+-                                if(*p == TJS_W('['))
++                                if(escape && *p == TJS_W('['))
+                                     r_count++;
+                                 p++;
+                                 r_count++;
+@@ -1856,7 +1864,7 @@ iTJSDispatch2 *tTJSNI_KAGParser::_GetNextTag() {
+                             // escape '['
+                             p = exp.c_str();
+                             while(*p) {
+-                                if(*p == TJS_W('[')) {
++                                if(escape && *p == TJS_W('[')) {
+                                     *d = TJS_W('[');
+                                     d++;
+                                     *d = TJS_W('[');

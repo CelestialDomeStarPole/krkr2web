@@ -61,7 +61,16 @@ foreach ($game in $catalog.games) {
 }
 $catalog | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $catalogPath -Encoding UTF8
 
-python (Join-Path $PSScriptRoot "check_d4_artifacts.py") --directory $output
+# krkr2web: stamp local asset references with content hashes so a revalidated
+# index.html can only pull matching scripts (Android WebView has served stale
+# no-cache subresources after redeployments, breaking engine-profiles.js).
+python (Join-Path $PSScriptRoot "stamp_build_versions.py") --directory $output
+if ($LASTEXITCODE -ne 0) { throw "D5 build version stamping failed" }
+
+$nodeForCheck = Join-Path $projectRoot (Join-Path ".toolchains" (Join-Path "emsdk" (Join-Path "node" (Join-Path "18.20.3_64bit" (Join-Path "bin" "node.exe")))))
+$checkArgs = @(Join-Path $PSScriptRoot "check_d4_artifacts.py"), "--directory", $output
+if (Test-Path $nodeForCheck) { $checkArgs += @("--node", $nodeForCheck) }
+python @checkArgs
 if ($LASTEXITCODE -ne 0) { throw "D5 product shell validation failed" }
 python (Join-Path $PSScriptRoot "check_d5_artifacts.py") `
     --directory $output `

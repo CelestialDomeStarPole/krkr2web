@@ -47,6 +47,8 @@ class D5ScanTests(unittest.TestCase):
             (ROOT / "engine" / "profiles" / "senren-banka-v1.json").read_text(encoding="utf-8")
         )
         self.assertIn("-debugwin=no", profile["engineArguments"])
+        self.assertIn("-scanim=no", profile["engineArguments"])
+        self.assertIn("-krkr2web-ui-language=zh-CN", profile["engineArguments"])
 
     def test_continued_index_and_compressed_script_are_scanned(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

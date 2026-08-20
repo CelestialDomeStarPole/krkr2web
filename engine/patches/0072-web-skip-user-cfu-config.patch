@@ -1,0 +1,22 @@
+diff --git a/src/core/base/sdl2/SysInitImpl.cpp b/src/core/base/sdl2/SysInitImpl.cpp
+--- a/src/core/base/sdl2/SysInitImpl.cpp
++++ b/src/core/base/sdl2/SysInitImpl.cpp
+@@ -1946,7 +1946,18 @@
+ 			if(stop_after_datapath_got) return;
+ 
+ 			// read per-user configuration file
++			// krkr2web: the web savedata directory is shared/imported game
++			// data; a leftover data.cfu from another environment (exe or
++			// emulator config artifact) would inject engine arguments that
++			// the game then interprets (e.g. -memusage enabling the debug
++			// log window whose k2compat console cannot initialize here).
++			// The web build manages its arguments via the engine profile
++			// only, so the per-user config file read is skipped.
++#ifndef __EMSCRIPTEN__
+ 			options[2] = TVPGetConfigFileOptions(ApplicationSpecialPath::GetUserConfigFileName(config_datapath, ExePath()));
++#else
++			options[2] = NULL;
++#endif
+ 
+ 			// push each options into option stock
+ 			// we need to clear TVPProgramArguments first because of the

@@ -9,6 +9,7 @@ $targetLockPath = Join-Path $projectRoot "toolchains\d0-toolchain.lock.json"
 $engineLock = Get-Content -Raw -Encoding UTF8 $engineLockPath | ConvertFrom-Json
 $upstream = Join-Path $projectRoot $engineLock.localCheckout
 $referenceProjects = Split-Path -Parent $upstream
+$motionPlayerTargetRelative = "external\krkrz\plugin\motionplayer"
 $probeFont = Join-Path $referenceProjects "kirikiroid2-web\ui\cocos-studio\DroidSansFallback.ttf"
 $probeFontLicense = Join-Path $referenceProjects "kirikiroid2-web\ui\cocos-studio\DroidSansFallback.LICENSE.txt"
 $workRoot = Join-Path $projectRoot "build\d3-engine-work"
@@ -22,21 +23,29 @@ $tools = Join-Path $projectRoot ".toolchains\d3-build-tools\Scripts"
 $cmake = Join-Path $tools "cmake.exe"
 $ninja = Join-Path $tools "ninja.exe"
 $patches = @($engineLock.patches | ForEach-Object { Join-Path (Join-Path $projectRoot "engine") $_ })
+$allPatches = @($patches)
 $exportMarker = Join-Path $source ".krkr2web-export-complete"
-$fingerprints = @($engineLock.commit)
-foreach ($patch in $patches) {
+$fingerprints = @($engineLock.commit, (Get-FileHash -Algorithm SHA256 $PSCommandPath).Hash.ToLowerInvariant())
+foreach ($patch in $allPatches) {
     $fingerprints += (Get-FileHash -Algorithm SHA256 $patch).Hash.ToLowerInvariant()
 }
 foreach ($sourceImport in @($engineLock.sourceImports)) {
     $fingerprints += "$($sourceImport.commit):$($sourceImport.name)"
+    $importRoot = Join-Path $projectRoot $sourceImport.localCheckout
     foreach ($file in @($sourceImport.files)) {
-        $importPath = Join-Path (Join-Path $projectRoot $sourceImport.localCheckout) $file.source
+        $importPath = Join-Path $importRoot $file.source
         $fingerprints += (Get-FileHash -Algorithm SHA256 $importPath).Hash.ToLowerInvariant()
+    }
+    foreach ($directory in @($sourceImport.directories | Where-Object { $null -ne $_ })) {
+        $importDirectory = Join-Path $importRoot $directory.source
+        foreach ($importFile in @(Get-ChildItem -LiteralPath $importDirectory -Recurse -File | Sort-Object FullName)) {
+            $fingerprints += (Get-FileHash -Algorithm SHA256 $importFile.FullName).Hash.ToLowerInvariant()
+        }
     }
 }
 $expectedExportMarker = $fingerprints -join ":"
 
-foreach ($required in @($upstream, $emcmake, $emcc, $cmake, $ninja, $probeFont, $probeFontLicense) + $patches) {
+foreach ($required in @($upstream, $emcmake, $emcc, $cmake, $ninja, $probeFont, $probeFontLicense) + $allPatches) {
     if (-not (Test-Path $required)) { throw "D3 dependency missing: $required" }
 }
 $actualCommit = (git -C $upstream rev-parse HEAD).Trim()
@@ -52,6 +61,18 @@ foreach ($sourceImport in @($engineLock.sourceImports)) {
         throw "$($sourceImport.name) checkout is $importCommit; expected $($sourceImport.commit)"
     }
     if (git -C $importRoot status --porcelain) { throw "The locked $($sourceImport.name) checkout has local changes" }
+    foreach ($file in @($sourceImport.files)) {
+        $importPath = Join-Path $importRoot $file.source
+        if (-not (Test-Path -LiteralPath $importPath -PathType Leaf)) {
+            throw "$($sourceImport.name) source file is missing: $importPath"
+        }
+    }
+    foreach ($directory in @($sourceImport.directories | Where-Object { $null -ne $_ })) {
+        $importPath = Join-Path $importRoot $directory.source
+        if (-not (Test-Path -LiteralPath $importPath -PathType Container)) {
+            throw "$($sourceImport.name) source directory is missing: $importPath"
+        }
+    }
 }
 
 if ($Clean -and (Test-Path $workRoot)) { Remove-Item -LiteralPath $workRoot -Recurse -Force }
@@ -65,39 +86,100 @@ if ((Test-Path $source) -and $actualExportMarker -ne $expectedExportMarker) {
     if (Test-Path $cmakeBuild) { Remove-Item -LiteralPath $cmakeBuild -Recurse -Force }
 }
 if (-not (Test-Path $exportMarker)) {
+    # Clear leftovers from a previously failed export before re-exporting.
+    if (Test-Path $source) { Remove-Item -LiteralPath $source -Recurse -Force }
     New-Item -ItemType Directory -Force $source | Out-Null
+    # Extract with tools/extract_tar.py: both GNU tar (Git Bash) and bsdtar
+    # fail to create the repo's android-project symlinks on Windows. The
+    # python extractor materializes symlinks as text, like git's
+    # core.symlinks=false checkouts. Note: git archive --output must stay
+    # absolute -- relative paths resolve inside the -C directory.
     $archivePath = Join-Path $workRoot "source.tar"
     git -C $upstream archive --format=tar --output=$archivePath HEAD
     if ($LASTEXITCODE -ne 0) { throw "Cannot export locked krkrsdl2 source" }
-    tar -xf $archivePath -C $source
+    python (Join-Path $projectRoot "tools\extract_tar.py") --archive $archivePath --dest $source
     if ($LASTEXITCODE -ne 0) { throw "Cannot extract locked krkrsdl2 source" }
     Remove-Item -LiteralPath $archivePath -Force
-    $submodules = git -C $upstream submodule status --recursive
-    foreach ($line in $submodules) {
-        if ($line -match '^[-+ ]([0-9a-f]{40})\s+([^ ]+)') {
-            $relative = $Matches[2]
-            $submoduleSource = Join-Path $upstream $relative
-            $submoduleTarget = Join-Path $source $relative
-            New-Item -ItemType Directory -Force $submoduleTarget | Out-Null
-            $archivePath = Join-Path $workRoot "submodule.tar"
-            git -C $submoduleSource archive --format=tar --output=$archivePath HEAD
-            if ($LASTEXITCODE -ne 0) { throw "Cannot export submodule: $relative" }
-            tar -xf $archivePath -C $submoduleTarget
-            if ($LASTEXITCODE -ne 0) { throw "Cannot extract submodule: $relative" }
-            Remove-Item -LiteralPath $archivePath -Force
+    # git-submodule is a shell wrapper and is not usable in the restricted
+    # Windows build environment. Resolve gitlinks recursively using git's
+    # native config/ls-tree/archive commands instead.
+    function Get-LockedSubmodules([string]$repository, [string]$prefix) {
+        $gitmodules = Join-Path $repository ".gitmodules"
+        if (-not (Test-Path -LiteralPath $gitmodules)) { return }
+        $entries = @(git -C $repository config --file .gitmodules --get-regexp '^submodule\..*\.path$')
+        if ($LASTEXITCODE -notin @(0, 1)) { throw "Cannot inspect submodules: $repository" }
+        foreach ($entry in $entries) {
+            if ($entry -notmatch '^\S+\s+(.+)$') { continue }
+            $childRelative = $Matches[1].Trim()
+            $childSource = Join-Path $repository $childRelative
+            $treeEntry = (git -C $repository ls-tree HEAD -- $childRelative | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $treeEntry -notmatch '^160000 commit ([0-9a-f]{40})\s+') {
+                throw "Cannot resolve submodule gitlink: $repository/$childRelative"
+            }
+            $childCommit = $Matches[1]
+            $actualChildCommit = (git -C $childSource rev-parse HEAD).Trim()
+            if ($LASTEXITCODE -ne 0 -or $actualChildCommit -ne $childCommit) {
+                throw "Submodule $childSource is $actualChildCommit; expected $childCommit"
+            }
+            $outputRelative = if ($prefix) { Join-Path $prefix $childRelative } else { $childRelative }
+            [pscustomobject]@{
+                Source = $childSource
+                Relative = $outputRelative
+                Commit = $childCommit
+            }
+            Get-LockedSubmodules $childSource $outputRelative
         }
+    }
+    foreach ($submodule in @(Get-LockedSubmodules $upstream "")) {
+        $submoduleTarget = Join-Path $source $submodule.Relative
+        New-Item -ItemType Directory -Force $submoduleTarget | Out-Null
+        $archivePath = Join-Path $workRoot "submodule.tar"
+        git -C $submodule.Source archive --format=tar --output=$archivePath $submodule.Commit
+        if ($LASTEXITCODE -ne 0) { throw "Cannot export submodule: $($submodule.Relative)" }
+        python (Join-Path $projectRoot "tools\extract_tar.py") --archive $archivePath --dest $submoduleTarget
+        if ($LASTEXITCODE -ne 0) { throw "Cannot extract submodule: $($submodule.Relative)" }
+        Remove-Item -LiteralPath $archivePath -Force
     }
     # NOTE: do NOT `git init` here. In the DSH sandbox, git apply misreads
     # file contents whenever a .git directory is present (patch context fails
     # to match even byte-identical lines). git apply works fine without a repo.
     foreach ($sourceImport in @($engineLock.sourceImports)) {
         $importRoot = Join-Path $projectRoot $sourceImport.localCheckout
+        # Copy directory units first. Some imports intentionally overlay a
+        # compatibility header inside an imported directory (for example the
+        # Motion RenderManager ABI); replacing the directory after individual
+        # files would silently delete that overlay.
+        foreach ($directory in @($sourceImport.directories | Where-Object { $null -ne $_ })) {
+            $target = Join-Path $source $directory.target
+            if (Test-Path -LiteralPath $target) {
+                Remove-Item -LiteralPath $target -Recurse -Force
+            }
+            New-Item -ItemType Directory -Force $target | Out-Null
+            Copy-Item (Join-Path (Join-Path $importRoot $directory.source) "*") `
+                -Destination $target -Recurse -Force
+        }
         foreach ($file in @($sourceImport.files)) {
             $target = Join-Path $source $file.target
             New-Item -ItemType Directory -Force (Split-Path -Parent $target) | Out-Null
             Copy-Item -LiteralPath (Join-Path $importRoot $file.source) -Destination $target -Force
         }
     }
+
+    # The locked kirikiroid2-web unit uses krkr2's narrow AsStdString name.
+    # krkrsdl2 exposes the ABI-equivalent conversion as AsNarrowStdString.
+    foreach ($pluginSourceRoot in @(
+        (Join-Path $source $motionPlayerTargetRelative),
+        (Join-Path $source "external\krkrz\plugin\psbfile")
+    )) {
+        foreach ($pluginSourceFile in @(Get-ChildItem -LiteralPath $pluginSourceRoot -Recurse -File | Where-Object { $_.Extension -in @(".cpp", ".h") })) {
+            $pluginSourceText = Get-Content -Raw -Encoding UTF8 $pluginSourceFile.FullName
+            $adaptedPluginSourceText = $pluginSourceText.Replace(".AsStdString()", ".AsNarrowStdString()")
+            if ($adaptedPluginSourceText -ne $pluginSourceText) {
+                Set-Content -LiteralPath $pluginSourceFile.FullName -Value $adaptedPluginSourceText -Encoding UTF8 -NoNewline
+            }
+        }
+    }
+
     # krkr2web: apply patches with python, NOT git apply.  In the DSH sandbox
     # git.exe sees a different file view (reads/writes never reach the files
     # other processes see), so git apply silently misapplies everything.
@@ -119,6 +201,12 @@ if (Test-Path $webShimSource) {
     Copy-Item (Join-Path $webShimSource "*") -Destination $webShimTarget -Recurse -Force
 }
 
+# krkrsdl2 has no RenderManager abstraction. The imported Motion unit keeps
+# the reference ABI while this adapter binds it to the existing Layer path.
+$motionCompatSource = Join-Path $projectRoot "engine\plugins\motionplayer-web\MotionRenderCompat.cpp"
+$motionCompatTarget = Join-Path $source "$motionPlayerTargetRelative\MotionRenderCompat.cpp"
+Copy-Item -LiteralPath $motionCompatSource -Destination $motionCompatTarget -Force
+
 # krkr2web ADR-008: copy libwebp (WebP decode) + WebP graphic loader (from kirikiroid2-web)
 # into the build tree on every build. The game stores most images as WebP with
 # .png/.jpg/.tlg extensions, so a WebP decoder is required for rendering.
@@ -132,6 +220,12 @@ $loadWebpSource = Join-Path $projectRoot "engine\webp\LoadWEBP.cpp"
 $loadWebpTarget = Join-Path $source "external\krkrz\visual\LoadWEBP.cpp"
 Copy-Item -LiteralPath $loadWebpSource -Destination $loadWebpTarget -Force
 
+# krkr2web: built-in streamed Ogg Vorbis decoder. It reads through the existing
+# virtual XP3 stream, so decoded voice data does not require a whole-file copy.
+$vorbisDecoderSource = Join-Path $projectRoot "engine\audio\OggVorbisDecoder.cpp"
+$vorbisDecoderTarget = Join-Path $source "external\krkrz\sound\OggVorbisDecoder.cpp"
+Copy-Item -LiteralPath $vorbisDecoderSource -Destination $vorbisDecoderTarget -Force
+
 # Generate a minimal libwebp config.h (generic C, no SIMD, no threads) for Emscripten.
 $webpConfigDir = Join-Path $source "external\webp\src\webp"
 New-Item -ItemType Directory -Force $webpConfigDir | Out-Null
@@ -141,15 +235,6 @@ $webpConfig = @"
 #define VERSION "1.3.2"
 "@
 Set-Content -LiteralPath (Join-Path $webpConfigDir "config.h") -Value $webpConfig -Encoding ASCII
-
-# krkr2web ADR-008: copy the psbfile plugin (PSB/PSD image decoding) from kirikiroid2-web.
-$psbSource = Join-Path $referenceProjects "kirikiroid2-web\cpp\plugins\psbfile"
-$psbTarget = Join-Path $source "external\krkrz\plugin\psbfile"
-if (Test-Path $psbSource) {
-    New-Item -ItemType Directory -Force $psbTarget | Out-Null
-    Copy-Item (Join-Path $psbSource "*.cpp") -Destination $psbTarget -Force
-    Copy-Item (Join-Path $psbSource "*.h") -Destination $psbTarget -Force
-}
 
 # krkr2web ADR-008: copy the saveStruct plugin (adapted: no fmt, +StorageIntf/UtilStreams includes).
 $saveStructSource = Join-Path $projectRoot "engine\plugins\saveStruct.cpp"
@@ -178,11 +263,18 @@ $layerExDrawSource = Join-Path $projectRoot "engine\plugins\layerExDraw.cpp"
 $layerExDrawTarget = Join-Path $source "external\krkrz\plugin\layerExDraw.cpp"
 Copy-Item -LiteralPath $layerExDrawSource -Destination $layerExDrawTarget -Force
 
+# Web platform module for the Window notification contract. The complete
+# Windows plugin registers MenuItem/Pad/Debug hooks that do not exist in the
+# browser and can leave NCB half-registered when one attachment fails.
+$windowExWebSource = Join-Path $projectRoot "engine\plugins\windowEx-web.cpp"
+$windowExWebTarget = Join-Path $source "external\krkrz\plugin\windowEx-web.cpp"
+Copy-Item -LiteralPath $windowExWebSource -Destination $windowExWebTarget -Force
+
 if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
     New-Item -ItemType Directory -Force $cmakeBuild | Out-Null
     & $emcmake $cmake -S $source -B $cmakeBuild -G Ninja `
         "-DCMAKE_MAKE_PROGRAM=$ninja" `
-        "-DCMAKE_BUILD_TYPE=MinSizeRel" `
+        "-DCMAKE_BUILD_TYPE=Release" `
         "-DOPTION_ENABLE_EXTERNAL_PLUGINS=OFF" `
         "-DOPTION_ENABLE_ASYNC_IMAGE_LOAD=OFF" `
         "-DKRKRSDL2_EMSCRIPTEN_ENABLE_THREADS=OFF" `
@@ -194,6 +286,11 @@ if (-not (Test-Path (Join-Path $cmakeBuild "build.ninja"))) {
 }
 & $cmake --build $cmakeBuild --target krkrsdl2 --parallel
 if ($LASTEXITCODE -ne 0) { throw "D3 engine compilation failed" }
+python (Join-Path $projectRoot "tools\check_worker_contract.py") `
+    --contract (Join-Path $projectRoot "engine\worker-runtime-contract.json") `
+    --build-plan (Join-Path $cmakeBuild "build.ninja") `
+    --glue (Join-Path $cmakeBuild "krkrsdl2.js")
+if ($LASTEXITCODE -ne 0) { throw "D3 baseline violates the Dedicated Worker contract" }
 
 if (Test-Path $output) { Get-ChildItem -LiteralPath $output -Force | Remove-Item -Recurse -Force } else { New-Item -ItemType Directory -Force $output | Out-Null }
 Copy-Item (Join-Path $projectRoot "probes\d3-engine\web\*") $output -Recurse
@@ -219,7 +316,7 @@ if ($LASTEXITCODE -ne 0) { throw "D3 test XP3 generation failed" }
 python (Join-Path $projectRoot "tools\check_d3_artifacts.py") `
     --wasm (Join-Path $output "krkrsdl2.wasm") --glue (Join-Path $output "krkrsdl2.js") `
     --lock $targetLockPath --engine-lock $engineLockPath `
-    $(foreach ($patch in $patches) { "--patch"; $patch }) `
+    $(foreach ($patch in $allPatches) { "--patch"; $patch }) `
     --compiler $emcc --output (Join-Path $output "d3-build.json")
 if ($LASTEXITCODE -ne 0) { throw "D3 compatibility gate failed" }
 Write-Host "D3 build completed: $output" -ForegroundColor Green

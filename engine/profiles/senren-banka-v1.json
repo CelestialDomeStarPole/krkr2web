@@ -13,21 +13,27 @@
   ],
   "engineArguments": [
     "-debugwin=no",
-    "-krkr2web-motion-bootstrap=yes"
+    "-scanim=no",
+    "-deffont=Source Han Sans SC",
+    "-krkr2web-ui-language=zh-CN"
   ],
   "runtime": {
     "initialWasmMemoryBytes": 67108864,
     "maximumWasmMemoryBytes": 536870912,
     "indexedDbChunkBytes": 4194304,
-    "indexedDbCacheChunks": 4,
+    "indexedDbCacheChunks": 16,
     "xp3SegmentCacheBytes": 1048576
   },
   "display": {
-    "mode": "1080p"
+    "mode": "720p"
   },
   "plugins": {
-    "motionplayer.dll": "bootstrap-only"
+    "motionplayer.dll": "native-lazy-psb",
+    "wuvorbis.dll": "built-in-streaming"
   },
-  "videoStrategy": "deferred-d6",
+  "runtimeCompatibility": {
+    "directKagScenario": false
+  },
+  "videoStrategy": "mp4-bridge",
   "allowStartupTimeoutReady": false
 }

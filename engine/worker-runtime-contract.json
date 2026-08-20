@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "target": {
+    "browser": "Chromium",
+    "minimumMajorVersion": 89,
+    "crossOriginIsolationRequired": false,
+    "sharedArrayBufferRequired": false
+  },
+  "referenceEngine": {
+    "repository": "https://github.com/fenghengzhi/kirikiroid2-web.git",
+    "commit": "338d2029f16969b84becfd163c67f99740e28296"
+  },
+  "requiredBuildFlags": [
+    "-sENVIRONMENT=web,worker",
+    "-sOFFSCREENCANVAS_SUPPORT=1",
+    "-sASYNCIFY=1",
+    "-sMODULARIZE=1",
+    "-sMIN_CHROME_VERSION=89"
+  ],
+  "forbiddenBuildPatterns": [
+    "(?:^|\\s)-pthread(?:\\s|$)",
+    "(?:^|\\s)-sUSE_PTHREADS(?:=1)?(?:\\s|$)",
+    "(?:^|\\s)-sPROXY_TO_PTHREAD(?:=1)?(?:\\s|$)",
+    "(?:^|\\s)-sPTHREAD_POOL_SIZE(?:=[^\\s]+)?(?:\\s|$)",
+    "(?:^|\\s)-sJSPI(?:=1)?(?:\\s|$)",
+    "(?:^|\\s)-fwasm-exceptions(?:\\s|$)",
+    "(?:^|\\s)-msimd128(?:\\s|$)",
+    "(?:^|\\s)-sOFFSCREEN_FRAMEBUFFER(?:=1)?(?:\\s|$)"
+  ],
+  "requiredGlueTokens": [
+    "ENVIRONMENT_IS_WORKER",
+    "Asyncify"
+  ],
+  "forbiddenGlueTokens": [
+    "SharedArrayBuffer",
+    "Atomics.",
+    "WebAssembly.Suspending",
+    "WebAssembly.promising",
+    "PThread"
+  ],
+  "gpuMigration": {
+    "strategy": "replace-engine-core",
+    "atomicSourceRoots": [
+      "cpp/core",
+      "cpp/plugins/motionplayer",
+      "cpp/plugins/psbfile",
+      "vcpkg/ports/cocos2dx"
+    ],
+    "hostOwnedBoundaries": [
+      "platforms/web",
+      "cpp/core/environ/web/VirtualLazyFS.cpp",
+      "cpp/core/environ/web/VirtualLazyFS.h",
+      "cpp/core/sound",
+      "cpp/core/movie"
+    ]
+  }
+}

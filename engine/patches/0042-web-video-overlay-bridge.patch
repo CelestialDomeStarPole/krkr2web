@@ -1,0 +1,135 @@
+diff --git a/src/core/visual/sdl2/VideoOvlImpl.h b/src/core/visual/sdl2/VideoOvlImpl.h
+--- a/src/core/visual/sdl2/VideoOvlImpl.h
++++ b/src/core/visual/sdl2/VideoOvlImpl.h
+@@ -1,6 +1,15 @@
+ 	bool	IsEventPast;
+ 	int		EventFrame;		//!< イベントを発生させるフレーム
+ 
+ public:
+ 	tTJSNI_VideoOverlay();
++#if defined(__EMSCRIPTEN__)
++	// krkr2web: the host page plays a pre-transcoded copy of the video and
++	// reports completion through the krkr2webVideoEnded embind function,
++	// which drives the same onStatusChanged events as the win32 krmovie
++	// path, so game scripts observe native playback semantics.
++	static void NotifyWebVideoEnded();
++	static tTJSNI_VideoOverlay *WebVideoActiveOverlay;
++#endif
++
+
+diff --git a/src/core/visual/sdl2/VideoOvlImpl.cpp b/src/core/visual/sdl2/VideoOvlImpl.cpp
+--- a/src/core/visual/sdl2/VideoOvlImpl.cpp
++++ b/src/core/visual/sdl2/VideoOvlImpl.cpp
+@@ -1,6 +1,15 @@
+ 	for(i = TVPVideoOverlayVector.begin(); i != TVPVideoOverlayVector.end(); i++)
+ 	{
+ 		(*i)->Shutdown();
+ 	}
+ }
++
++#if defined(__EMSCRIPTEN__)
++#include <emscripten.h>
++// krkr2web: no in-wasm video decoder (the win32 path needs DirectShow via
++// krmovie). The host page owns a <video> overlay and plays a pre-transcoded
++// webm; all hooks are synchronous no-ops when the page does not define
++// them, preserving the previous skip-video behavior.
++EM_JS(void, krkr2webVideoOpen, (const char *name), {
++	if (globalThis.krkr2webVideoOpen) globalThis.krkr2webVideoOpen(UTF8ToString(name));
++});
++EM_JS(void, krkr2webVideoPlay, (), {
++	if (globalThis.krkr2webVideoPlay) globalThis.krkr2webVideoPlay();
++});
++EM_JS(void, krkr2webVideoStop, (), {
++	if (globalThis.krkr2webVideoStop) globalThis.krkr2webVideoStop();
++});
++EM_JS(void, krkr2webVideoPause, (int pause), {
++	if (globalThis.krkr2webVideoPause) globalThis.krkr2webVideoPause(pause);
++});
++
++tTJSNI_VideoOverlay *tTJSNI_VideoOverlay::WebVideoActiveOverlay = nullptr;
++
++void tTJSNI_VideoOverlay::NotifyWebVideoEnded()
++{
++	tTJSNI_VideoOverlay *overlay = WebVideoActiveOverlay;
++	if(!overlay) return;
++	// posts onStatusChanged("stop") through the normal event queue; looping
++	// videos never reach this (the host page restarts them instead).
++	overlay->SetStatus(tTVPVideoOverlayStatus::Stop);
++}
++#endif
+@@ -1,6 +1,15 @@
+ 	// set Status
+ 	ClearWndProcMessages();
+ 	SetStatus(tTVPVideoOverlayStatus::Stop);
++#elif defined(__EMSCRIPTEN__)
++	// krkr2web: hand the storage name to the host page, which maps it to a
++	// pre-transcoded webm served under /videos/<game>/.
++	ttstr name(_name);
++	const tjs_char *param_pos = TJS_strchr(name.c_str(), TJS_W('?'));
++	if(param_pos != NULL)
++		name = ttstr(name.c_str(), (tjs_int)(param_pos - name.c_str()));
++	krkr2webVideoOpen(name.AsNarrowStdString().c_str());
++	WebVideoActiveOverlay = this;
++	SetStatus(tTVPVideoOverlayStatus::Stop);
+ #endif
+ }
+@@ -1,6 +1,15 @@
+ 	Bitmap[0] = Bitmap[1] = NULL;
+ 	BmpBits[0] = BmpBits[1] = NULL;
++#elif defined(__EMSCRIPTEN__)
++	if(WebVideoActiveOverlay == this)
++	{
++		WebVideoActiveOverlay = nullptr;
++		krkr2webVideoStop();
++	}
++	SetStatus(tTVPVideoOverlayStatus::Unload);
+ #endif
+ }
+ //---------------------------------------------------------------------------
+ void tTJSNI_VideoOverlay::Shutdown()
+@@ -1,6 +1,15 @@
+ 		if( Mode != vomMFEVR ) SetStatus(tTVPVideoOverlayStatus::Play);
+ 	}
++#elif defined(__EMSCRIPTEN__)
++	krkr2webVideoPlay();
++	SetStatus(tTVPVideoOverlayStatus::Play);
+ #endif
+ }
+@@ -1,6 +1,15 @@
+ 		if( Mode != vomMFEVR ) SetStatus(tTVPVideoOverlayStatus::Stop);
+ 	}
++#elif defined(__EMSCRIPTEN__)
++	krkr2webVideoStop();
++	SetStatus(tTVPVideoOverlayStatus::Stop);
+ #endif
+ }
+@@ -1,6 +1,15 @@
+ 		if( Mode != vomMFEVR ) SetStatus(tTVPVideoOverlayStatus::Pause);
+ 	}
++#elif defined(__EMSCRIPTEN__)
++	krkr2webVideoPause(1);
++	SetStatus(tTVPVideoOverlayStatus::Pause);
+ #endif
+ }
+
+diff --git a/src/plugins/kremscripten.cpp b/src/plugins/kremscripten.cpp
+--- a/src/plugins/kremscripten.cpp
++++ b/src/plugins/kremscripten.cpp
+@@ -1,6 +1,15 @@
+ void forceTerminateFromJS()
+ {
+ 	emscripten_cancel_main_loop();
+ }
+ 
++void webVideoEndedFromJS()
++{
++	tTJSNI_VideoOverlay::NotifyWebVideoEnded();
++}
++
+@@ -1,6 +1,15 @@
+ 	emscripten::function("forceTerminate", &forceTerminateFromJS);
++	emscripten::function("krkr2webVideoEnded", &webVideoEndedFromJS);
+
+@@ -1,6 +1,15 @@
+ #include "CharacterSet.h"
++#include "VideoOvlImpl.h"

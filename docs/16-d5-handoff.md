@@ -8,6 +8,36 @@
 
 ---
 
+## 0. 2026-08-15 最新状态（优先于旧章节）
+
+真实《千恋万花》已经从简体中文标题页进入 `CHAPTER 1-1`，剧情文字正确渲染，
+不再处于本文件旧版所述的黑屏、`[s]` 输入、`uiloadSetRect` 或 `start.ks:43`
+阻断。最终验证无致命弹窗、`firstError=null`，且 4.04 GB 缓存身份未变化。
+
+本轮在标题页里程碑之后完成：
+
+- `0035-emscripten-input-path.patch`：SDL 事件观察器改为排队，避免 DOM 回调
+  嵌套执行游戏逻辑而破坏 Asyncify；
+- `engine/plugins/textrender/TextRender.cpp`：21 处真假转换显式调用
+  `operator bool()`，修复 Integer-to-Object 崩溃；
+- `senren-banka-v1.json`：增加 `-deffont=Source Han Sans SC`，剧情字体不再
+  依赖 WebAssembly 环境中不存在的 Android 系统字体；
+- `0038-ogg-vorbis-streaming.patch` 与 `engine/audio/OggVorbisDecoder.cpp`：
+  OGG 流式解码，控制长音频的内存峰值；
+- `apps/web/player.js`：在启动点击手势中创建 AudioContext，并让 OpenAL 复用，
+  标题随机角色语音已验证产生非静音 PCM；
+- `apps/web/save-manager.js`：本机存档查看、分类、选择删除和全部删除；
+- 同页强制重启与崩溃恢复：同步存档后销毁旧 Wasm/IDBFS/XP3/AudioContext，
+  替换 Canvas 并创建新实例，URL 不变，断网恢复不产生网络请求。
+
+自动化现状：20 项 Python 测试通过；D4 浏览器回归验证断网启动、音频上下文、
+存档删除、主动重启和模拟致命弹窗恢复，启动及重启均为 0 网络请求。下一项是
+目标 WebView 实机复核上述用户可见行为，再继续推进真实存读档、长剧情和稳定性。
+motionplayer 动画及 WMV/AlphaMovie 视频仍未实现；视频仍是后续版本硬性范围。
+
+旧章节 2、5、6 是历史快照，排障细节仍有价值，但其中的当前状态和优先级均已
+被本节取代。
+
 ## 1. 目标与验收标准
 
 把 krkr2 引擎的 NCB 框架与游戏插件移植到 krkrsdl2（WebAssembly 引擎基座），
@@ -177,6 +207,9 @@ EventName 一起打出来（ttstr 是 UTF-16，需要转窄或用 TVPUtf16ToUtf8
 - **extrans / extNagano**：转场（mosaic/ripple/rotate ~3200 行），
   kirikiroid2-web 参考在 cpp/plugins/extrans，依赖 RenderManager，需适配到
   krkrsdl2 的绘制模型。
+  2026-08-15 起已用补丁 0039 临时降级：7 个 extrans 转场名回落到内置
+  crossfade（日志 KRKR2WEB_D5_TRANS_FALLBACK），option.ks/load.ks 的
+  "Cannot find transition handler wave" 致命错误已解除；真移植后自动失效。
 - **真实 layerExDraw**：参考 kirikiroid2-web（libgdiplus+Cocos2D 后端），
   krkrsdl2 无此栈；当前 stub 已让游戏跑过 custom.tjs（注意 stub 不能注册
   clear——游戏会向 Layer 实例赋值 .clear，见 plugin 内注释）。

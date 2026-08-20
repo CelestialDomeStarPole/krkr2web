@@ -1,0 +1,30 @@
+diff --git a/external/krkrz/plugin/motionplayer/PlayerResource.cpp b/external/krkrz/plugin/motionplayer/PlayerResource.cpp
+--- a/external/krkrz/plugin/motionplayer/PlayerResource.cpp
++++ b/external/krkrz/plugin/motionplayer/PlayerResource.cpp
+@@ -6,13 +6,12 @@
+ #include "RenderManager.h"
+ #include "SourceCache.h"
+ #include "tjsUtils.h"
++#include <GLES2/gl2.h>
+ #include "../../core/visual/ogl/imagepacker.h"
+ 
+ #include <algorithm>
+ 
+ using namespace motion::internal;
+ 
+-extern unsigned int TVPMaxTextureSize;
+-
+ namespace motion {
+ 
+     namespace {
+@@ -440,7 +439,9 @@
+             }
+ 
+             std::vector<ImagePacker::bin> bins;
+-            const int maxSide = static_cast<int>(TVPMaxTextureSize);
++            GLint maxTextureSize = 0;
++            glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
++            const int maxSide = static_cast<int>(maxTextureSize);
+             // The four atlas callers ignore ImagePacker::pack's boolean result:
+             // Kirikiroid2_1.3.9_Android_arm64-v8a.so!sub_6931C8@0x693C94
+             // calls the same binary's sub_A6DA58@0xA6DA58;

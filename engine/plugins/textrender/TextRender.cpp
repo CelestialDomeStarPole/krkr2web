@@ -660,15 +660,23 @@ public:
 
     // ============================================================
     // dict 解析方法（setOption/setDefault/setFont/setStyle）。
-    //   dict 参数经 ncbind 封送为 tTJSVariant；方法体内的 ncbPropAccessor
-    //   持有 AsObject() 增加的 dispatch 引用。它先于工作 variant 构造，因而正常与
-    //   支持展开的目标都是先析构 variant，再 Release dictionary。
+    // wasm32 下不要让 ncbPropAccessor 再次封送 tTJSVariant；直接读取 raw callback
+    // 传入且由 TJS 持有的 dispatch，避免对象参数被错误解释为整数 0。
+    class DictionaryView {
+        iTJSDispatch2 *_object;
+
+    public:
+        explicit DictionaryView(iTJSDispatch2 *object) : _object(object) {}
+
+        bool checkVariant(const tjs_char *name, tTJSVariant &value) const {
+            return _object && TJS_SUCCEEDED(_object->PropGet(
+                TJS_MEMBERMUSTEXIST, name, nullptr, &value, _object));
+        }
+    };
     // ============================================================
     // setOption：(dict) → option 标量字段和四个禁则字符串；键顺序与覆盖关系见 analysis。
-    void setOption(tTJSVariant dictVar) {
-        if(dictVar.Type() != tvtObject)
-            TJSThrowVariantConvertError(dictVar, tvtObject);
-        ncbPropAccessor dict(dictVar);
+    void setOption(iTJSDispatch2 *dictObject) {
+        DictionaryView dict(dictObject);
         tTJSVariant v;
         // 四段字符串查询直接属于 setOption。每个 string 分支各构造一个短 ttstr，
         // 赋值完成后立即析构；void 写空串，其它类型抛 String 转换错误。
@@ -706,39 +714,37 @@ public:
         }
         // --- byte/DWORD 选项：按二进制顺序直接执行 TJS variant 真值转换 ---
         if(dict.checkVariant(TJS_W("vertical"), v))
-            _vertical = (bool)v;
+            _vertical = v.operator bool();
         if(dict.checkVariant(TJS_W("kinsoku_max"), v))
-            _kinsokuMax = (bool)v ? 1 : 0;
+            _kinsokuMax = v.operator bool() ? 1 : 0;
         if(dict.checkVariant(TJS_W("word_break"), v))
-            _wordBreak = (bool)v;
+            _wordBreak = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_color"), v))
-            _ignoreColor = (bool)v;
+            _ignoreColor = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_size"), v))
-            _ignoreSize = (bool)v;
+            _ignoreSize = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_delay"), v))
-            _ignoreDelay = (bool)v;
+            _ignoreDelay = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_over"), v))
-            _ignoreOverY = (bool)v;
+            _ignoreOverY = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_overy"), v))
-            _ignoreOverY = (bool)v;             // 后出现的同义键覆盖 ignore_over。
+            _ignoreOverY = v.operator bool();   // 后出现的同义键覆盖 ignore_over。
         if(dict.checkVariant(TJS_W("ignore_overx"), v))
-            _ignoreOverX = (bool)v;
+            _ignoreOverX = v.operator bool();
         if(dict.checkVariant(TJS_W("width_time_scale"), v))
-            _widthTimeScale = (bool)v;
+            _widthTimeScale = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_ruby"), v))
-            _ignoreRuby = (bool)v;
+            _ignoreRuby = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_type"), v))
-            _ignoreType = (bool)v;
+            _ignoreType = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_face"), v))
-            _ignoreFace = (bool)v;
+            _ignoreFace = v.operator bool();
         if(dict.checkVariant(TJS_W("ignore_style"), v))
-            _ignoreStyle = (bool)v;
+            _ignoreStyle = v.operator bool();
     }
     // setDefault：(dict) → default* 字段（face/字号族/颜色族/对齐/间距）。
-    void setDefault(tTJSVariant dictVar) {
-        if(dictVar.Type() != tvtObject)
-            TJSThrowVariantConvertError(dictVar, tvtObject);
-        ncbPropAccessor dict(dictVar);
+    void setDefault(iTJSDispatch2 *dictObject) {
+        DictionaryView dict(dictObject);
         tTJSVariant v;
         // face → resolveFaceIndex。string→取值；void→空串；其它类型转换错误。
         if(dict.checkVariant(TJS_W("face"), v)) {
@@ -752,7 +758,7 @@ public:
             _defaultFaceIndex = resolveFaceIndex(faceName);
         }
         if(dict.checkVariant(TJS_W("bold"), v))
-            _defaultBold = (bool)v;
+            _defaultBold = v.operator bool();
         // fontsize 存在时，把缺省 big/small/ruby 字号回填为同一值。
         bool hasFontsize = dict.checkVariant(TJS_W("fontsize"), v);
         if(hasFontsize) {
@@ -777,13 +783,13 @@ public:
         if(dict.checkVariant(TJS_W("color"), v))
             _defaultChColor = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("shadow"), v))
-            _defaultShadow = (bool)v;
+            _defaultShadow = v.operator bool();
         if(dict.checkVariant(TJS_W("shadowcolor"), v))
             _defaultShadowColor = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("shadowdiff"), v))
             _defaultShadowDiff = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("edge"), v))
-            _defaultEdge = (bool)v;
+            _defaultEdge = v.operator bool();
         if(dict.checkVariant(TJS_W("edgecolor"), v))
             _defaultEdgeColor = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("linespacing"), v))
@@ -802,10 +808,8 @@ public:
     }
 
     // setFont：更新当前字体/描边字段；只有 face/bold/fontsize 变化会触发回调。
-    void setFont(tTJSVariant dictVar) {
-        if(dictVar.Type() != tvtObject)
-            TJSThrowVariantConvertError(dictVar, tvtObject);
-        ncbPropAccessor dict(dictVar);
+    void setFont(iTJSDispatch2 *dictObject) {
+        DictionaryView dict(dictObject);
         tTJSVariant v;
         bool changed = false;
         // face：present→resolveFaceIndex；idx 变则更新并置 changed=true。
@@ -824,7 +828,7 @@ public:
             }
         }
         if(dict.checkVariant(TJS_W("bold"), v)) {
-            bool b = (bool)v;
+            bool b = v.operator bool();
             if(_curBold != b) {
                 _curBold = b;
                 changed = true;
@@ -847,13 +851,13 @@ public:
         if(dict.checkVariant(TJS_W("color"), v))
             _curChColor = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("shadow"), v))
-            _curShadow = (bool)v;
+            _curShadow = v.operator bool();
         if(dict.checkVariant(TJS_W("shadowcolor"), v))
             _curShadowColor = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("shadowdiff"), v))
             _curShadowDiff = (tjs_uint32)v.AsInteger();
         if(dict.checkVariant(TJS_W("edge"), v))
-            _curEdge = (bool)v;
+            _curEdge = v.operator bool();
         if(dict.checkVariant(TJS_W("edgecolor"), v))
             _curEdgeColor = (tjs_uint32)v.AsInteger();
         if(changed)
@@ -861,10 +865,8 @@ public:
     }
 
     // setStyle：更新当前间距/对齐；linesize 缺失时回退 fontsize，不触发字体回调。
-    void setStyle(tTJSVariant dictVar) {
-        if(dictVar.Type() != tvtObject)
-            TJSThrowVariantConvertError(dictVar, tvtObject);
-        ncbPropAccessor dict(dictVar);
+    void setStyle(iTJSDispatch2 *dictObject) {
+        DictionaryView dict(dictObject);
         tTJSVariant v;
         if(dict.checkVariant(TJS_W("linespacing"), v))
             _curLineSpacing = (float)v.AsReal();
@@ -878,6 +880,52 @@ public:
             _curAlign = (tjs_int)v.AsInteger();
         if(dict.checkVariant(TJS_W("valign"), v))
             _curValign = (tjs_int)v.AsInteger();
+    }
+
+    // The wasm32 ABI can corrupt a tTJSVariant passed by value through the
+    // generic ncbind member invoker. These wrappers consume the original TJS
+    // argument and preserve Dictionary objects without an intermediate copy.
+    using DictionaryMethod = void (TextRenderBase::*)(iTJSDispatch2 *);
+
+    static tjs_error callDictionaryMethod(tjs_int numparams,
+                                          tTJSVariant **param,
+                                          TextRenderBase *instance,
+                                          DictionaryMethod method) {
+        if(numparams < 1 || !param || !param[0])
+            return TJS_E_BADPARAMCOUNT;
+        if(param[0]->Type() != tvtObject)
+            TJSThrowVariantConvertError(*param[0], tvtObject);
+        iTJSDispatch2 *object = param[0]->AsObjectNoAddRef();
+        (instance->*method)(object);
+        return TJS_S_OK;
+    }
+
+    static tjs_error setOptionRaw(tTJSVariant *, tjs_int numparams,
+                                  tTJSVariant **param,
+                                  TextRenderBase *instance) {
+        return callDictionaryMethod(numparams, param, instance,
+                                    &TextRenderBase::setOption);
+    }
+
+    static tjs_error setDefaultRaw(tTJSVariant *, tjs_int numparams,
+                                   tTJSVariant **param,
+                                   TextRenderBase *instance) {
+        return callDictionaryMethod(numparams, param, instance,
+                                    &TextRenderBase::setDefault);
+    }
+
+    static tjs_error setFontRaw(tTJSVariant *, tjs_int numparams,
+                                tTJSVariant **param,
+                                TextRenderBase *instance) {
+        return callDictionaryMethod(numparams, param, instance,
+                                    &TextRenderBase::setFont);
+    }
+
+    static tjs_error setStyleRaw(tTJSVariant *, tjs_int numparams,
+                                 tTJSVariant **param,
+                                 TextRenderBase *instance) {
+        return callDictionaryMethod(numparams, param, instance,
+                                    &TextRenderBase::setStyle);
     }
 
     // ============================================================
@@ -1066,7 +1114,7 @@ public:
             if(numparams < 5)
                 continueRender_guess = false;
             else
-                continueRender_guess = (bool)*param[4];
+                continueRender_guess = param[4]->operator bool();
         }
         bool ok;
         {
@@ -2025,14 +2073,14 @@ NCB_REGISTER_CLASS(TextRenderBase) {
     Factory(&TextRenderBase::factory);
 
     // ---- 16 methods（+ 上面 1 构造器 = 二进制 17 个 method-tag 成员）----
-    NCB_METHOD(setOption);
-    NCB_METHOD(setDefault);
+    NCB_METHOD_RAW_CALLBACK(setOption, &Class::setOptionRaw, 0);
+    NCB_METHOD_RAW_CALLBACK(setDefault, &Class::setDefaultRaw, 0);
     NCB_METHOD(setRenderSize);
     NCB_METHOD(clear);
     NCB_METHOD(resetFont);
     NCB_METHOD(resetStyle);
-    NCB_METHOD(setFont);
-    NCB_METHOD(setStyle);
+    NCB_METHOD_RAW_CALLBACK(setFont, &Class::setFontRaw, 0);
+    NCB_METHOD_RAW_CALLBACK(setStyle, &Class::setStyleRaw, 0);
     NCB_METHOD_RAW_CALLBACK(render, &Class::render, 0);
     NCB_METHOD(newline);
     NCB_METHOD(done);

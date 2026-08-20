@@ -1,0 +1,12 @@
+diff --git a/external/krkrz/plugin/motionplayer/PlayerUpdateLayersInternal.h b/external/krkrz/plugin/motionplayer/PlayerUpdateLayersInternal.h
+--- a/external/krkrz/plugin/motionplayer/PlayerUpdateLayersInternal.h
++++ b/external/krkrz/plugin/motionplayer/PlayerUpdateLayersInternal.h
+@@ -4,7 +4,7 @@
+ #include "MotionTraceWeb.h"
+ #include "ncbind.hpp" // ncbInstanceAdaptor<Player>::CreateAdaptor for TJS bridge
+ #include "tjsArray.h" // TJSCreateArrayObject, TJSGetArrayElementCount
+-#ifdef __EMSCRIPTEN__
++#if defined(__wasm_simd128__)
+ #include <wasm_simd128.h>
+ #endif
+ 

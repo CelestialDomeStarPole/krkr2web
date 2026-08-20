@@ -1,8 +1,8 @@
 diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
 --- a/src/core/base/sdl2/PluginImpl.cpp
 +++ b/src/core/base/sdl2/PluginImpl.cpp
-@@ -1211,3 +1211,11 @@
- 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM motionplayer.dll"));
+@@ -1203,3 +1203,11 @@
+ 			TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_NCB_FAILED motionplayer.dll"));
  	}
 +	else if(name == TJS_W("windowEx.dll"))
 +	{

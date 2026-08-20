@@ -1,11 +1,28 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -174,3 +174,7 @@
+@@ -174,3 +174,20 @@
  	external/krkrz/plugin/getSample.cpp
  	external/krkrz/plugin/scriptsEx.cpp
++	external/krkrz/plugin/BinaryAccessor.cpp
 +	external/krkrz/plugin/psbfile/PSBFile.cpp
 +	external/krkrz/plugin/psbfile/PSBRawFile.cpp
 +	external/krkrz/plugin/psbfile/PSBMedia.cpp
 +	external/krkrz/plugin/psbfile/PSBMediaRegistry.cpp
++	external/krkrz/plugin/xp3filter.cpp
  	external/krkrz/web/plugin_compat.cpp
+@@ -178,3 +195,14 @@
+ 	external/krkrz/web/plugin_compat.cpp
+ )
++file(GLOB_RECURSE KRKR2WEB_CXX17_PLUGIN_SRC
++	"${CMAKE_CURRENT_SOURCE_DIR}/external/krkrz/plugin/motionplayer/*.cpp"
++	"${CMAKE_CURRENT_SOURCE_DIR}/external/krkrz/plugin/psbfile/*.cpp"
++)
++list(APPEND KRKR2WEB_CXX17_PLUGIN_SRC
++	"${CMAKE_CURRENT_SOURCE_DIR}/external/krkrz/plugin/BinaryAccessor.cpp"
++	"${CMAKE_CURRENT_SOURCE_DIR}/external/krkrz/plugin/xp3filter.cpp"
++)
++set_source_files_properties(${KRKR2WEB_CXX17_PLUGIN_SRC}
++	PROPERTIES COMPILE_OPTIONS "-std=gnu++17" SKIP_PRECOMPILE_HEADERS ON
++)
+ list(APPEND KRKRSDL2COMMON_INCLUDES

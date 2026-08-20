@@ -106,8 +106,24 @@ def parse_patch(text):
                 # ignore "\ No newline at end of file" (never used by us)
                 pass
             else:
-                # end of hunk (blank separator between hunks or EOF)
-                hunk = None
+                nxt = lines[i + 1] if i + 1 < len(lines) else ""
+                if line == "" and (
+                    nxt[:1] in ("+", "-", " ") or nxt.startswith(BACKSLASH)
+                ):
+                    # git-style tolerance: a truly blank line followed by more
+                    # hunk content is an empty context line
+                    hunk.old.append("")
+                    hunk.new.append("")
+                else:
+                    # end of hunk (blank separator between hunks or EOF)
+                    hunk = None
+        elif line[:1] in ("+", "-", " ") and not (
+            line.startswith("--- ") or line.startswith("+++ ")
+        ):
+            # krkr2web: patch content outside a hunk means the diff is
+            # malformed and the hunk above was silently truncated. Fail
+            # loudly instead of claiming success with a no-op replacement.
+            raise ValueError("patch content outside hunk: %r" % line)
         i += 1
     return files
 

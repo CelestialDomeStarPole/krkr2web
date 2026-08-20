@@ -1,0 +1,42 @@
+diff --git a/external/krkrz/plugin/motionplayer/PlayerRenderTargets.cpp b/external/krkrz/plugin/motionplayer/PlayerRenderTargets.cpp
+--- a/external/krkrz/plugin/motionplayer/PlayerRenderTargets.cpp
++++ b/external/krkrz/plugin/motionplayer/PlayerRenderTargets.cpp
+@@ -374,19 +374,22 @@ namespace motion {
+         iTVPRenderMethod *selectD3DRenderMethod(int blendLowNibble,
+                                                 unsigned int color,
+                                                 bool alphaOpAdd,
+-                                                bool alphaTest,
+-                                                int opacity) {
++                                                bool alphaTest) {
+             auto *mgr = TVPGetRenderManager();
++            iTVPRenderMethod *method = nullptr;
+             if(mgr->IsSoftware()) {
+-                return mgr->GetRenderMethod(
+-                    opacity, false, softwareMethodForD3DBlend(blendLowNibble));
++                // The packed color already carries draw opacity in alpha.
++                // Keep the method opacity neutral so alpha is applied once.
++                method = mgr->GetRenderMethod(
++                    255, false, softwareMethodForD3DBlend(blendLowNibble));
++            } else {
++                method = mgr->GetRenderMethod(
++                    gpuMethodNameForD3DBlend(blendLowNibble, alphaOpAdd,
++                                             alphaTest));
+             }
+-
+-            auto *method = mgr->GetRenderMethod(
+-                gpuMethodNameForD3DBlend(blendLowNibble, alphaOpAdd,
+-                                         alphaTest));
+             if(!method) {
+                 return nullptr;
+             }
+@@ -1275,9 +1278,7 @@ namespace motion {
+             auto *method = selectD3DRenderMethod(
+                 item.blendMode & 0xF,
+                 d3dPackedColorWithOpacity(item, opacity),
+-                alphaOpAdd,
+-                item.stencilMaskRef != 0,
+-                opacity);
++                alphaOpAdd, item.stencilMaskRef != 0);
+             if(!method) {
+                 continue;
+             }

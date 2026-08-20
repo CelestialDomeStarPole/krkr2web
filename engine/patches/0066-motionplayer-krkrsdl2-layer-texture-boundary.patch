@@ -1,0 +1,212 @@
+diff --git a/external/krkrz/plugin/motionplayer/SourceCache.cpp b/external/krkrz/plugin/motionplayer/SourceCache.cpp
+--- a/external/krkrz/plugin/motionplayer/SourceCache.cpp
++++ b/external/krkrz/plugin/motionplayer/SourceCache.cpp
+@@ -347,15 +347,6 @@ namespace {
+         return result;
+     }
+ 
+-    iTVPTexture2D *textureFromLayerVariant(const tTJSVariant &value) {
+-        if(value.Type() != tvtObject || !value.AsObjectNoAddRef()) {
+-            return nullptr;
+-        }
+-        auto *layer = resolveNativeLayer(value.AsObjectNoAddRef());
+-        auto *image = layer ? layer->GetMainImage() : nullptr;
+-        return image ? image->GetTexture() : nullptr;
+-    }
+-
+ } // namespace
+ 
+ namespace motion {
+@@ -364,6 +355,7 @@ namespace motion {
+         if(_texture) {
+             _texture->Release();
+         }
++        delete _bitmap;
+     }
+ 
+     tTJSVariant ObjSource::getClip() const {
+@@ -485,9 +477,11 @@ namespace motion {
+                 static_cast<tjs_int>(pixelCount));
+         }
+ 
+-        auto *bitmap = new tTVPBitmap(width, static_cast<tjs_uint>(height), 32);
+-        const tjs_int pitch = bitmap->GetPitch();
+-        auto *destination = static_cast<std::uint8_t *>(bitmap->GetScanLine(0));
++        _bitmap = new tTVPBaseBitmap(
++            width, static_cast<tjs_uint>(height), 32);
++        const tjs_int pitch = _bitmap->GetPitchBytes();
++        auto *destination = static_cast<std::uint8_t *>(
++            _bitmap->GetScanLineForWrite(0));
+         const tjs_int rowBytes = static_cast<tjs_int>(4u * width);
+         if(rowBytes == pitch) {
+             std::memcpy(destination, bgra,
+@@ -501,8 +495,8 @@ namespace motion {
+                 source += rowBytes;
+             }
+         }
+-        _texture = TVPGetRenderManager()->CreateTexture2D(bitmap);
+-        bitmap->Release();
++        _texture = TVPGetRenderManager()->CreateTexture2D(
++            _bitmap->GetBitmap());
+         TJSAlignedDealloc(bgra);
+     }
+ 
+@@ -524,7 +518,7 @@ namespace motion {
+                reinterpret_cast<iTJSNativeInstance **>(&layer)))) {
+             TVPThrowExceptionMessage(TVPSpecifyLayer);
+         }
+-        layer->AssignTexture(_texture);
++        layer->AssignMainImageWithUpdate(_bitmap);
+         layer->SetSize(_texture->GetWidth(), _texture->GetHeight());
+     }
+ 
+@@ -719,6 +713,48 @@ namespace motion {
+             loadRenderSourceLayerFromItemLike_0x6C1B70(player, item));
+     }
+ 
++    iTVPTexture2D *SourceCache::textureFromLayerVariant(
++        const tTJSVariant &value) {
++        if(value.Type() != tvtObject || !value.AsObjectNoAddRef()) {
++            return nullptr;
++        }
++        auto *object = value.AsObjectNoAddRef();
++        auto *layer = resolveNativeLayer(object);
++        auto *image = layer ? layer->GetMainImage() : nullptr;
++        auto *bitmap = image ? image->GetBitmap() : nullptr;
++        if(!bitmap) {
++            return nullptr;
++        }
++
++        auto cached = _layerTextures.find(object);
++        if(cached != _layerTextures.end()) {
++            if(cached->second.bitmap == bitmap) {
++                return cached->second.texture;
++            }
++            cached->second.texture->Release();
++            _layerTextures.erase(cached);
++        }
++
++        auto *texture = TVPGetRenderManager()->CreateTexture2D(bitmap);
++        if(texture) {
++            _layerTextures.emplace(
++                object, LayerTextureCacheEntry{bitmap, texture});
++        }
++        return texture;
++    }
++
++    void SourceCache::eraseLayerTexture(const tTJSVariant &value) {
++        if(value.Type() != tvtObject || !value.AsObjectNoAddRef()) {
++            return;
++        }
++        const auto cached = _layerTextures.find(value.AsObjectNoAddRef());
++        if(cached == _layerTextures.end()) {
++            return;
++        }
++        cached->second.texture->Release();
++        _layerTextures.erase(cached);
++    }
++
+     iTVPTexture2D *SourceCache::loadRenderSourceTextureForItem_guess(
+         Player &player,
+         detail::PreparedRenderItem &item) {
+@@ -758,6 +794,10 @@ namespace motion {
+                 (void)object->Invalidate(0, nullptr, nullptr, object);
+             }
+         }
++        for(auto &cached : _layerTextures) {
++            cached.second.texture->Release();
++        }
++        _layerTextures.clear();
+         _entries.clear();
+         _currentCacheBytes = 0;
+     }
+@@ -768,6 +808,7 @@ namespace motion {
+             if(it->key.DiscernCompareStrictReal(key) || it->src == name) {
+                 _currentCacheBytes -=
+                     static_cast<std::uint32_t>(it->byteWeight);
++                eraseLayerTexture(it->layer);
+                 it = _entries.erase(it);
+             } else {
+                 ++it;
+@@ -784,6 +825,7 @@ namespace motion {
+     }
+ 
+     void SourceCache::bakeSource_guess(iTJSDispatch2 *source, Entry &entry) {
++        eraseLayerTexture(entry.layer);
+         {
+             ncbPropAccessor sourceAccessor(source);
+             sourceAccessor.FuncCall(0, TJS_W("drawLayer"),
+@@ -859,6 +901,7 @@ namespace motion {
+ 
+             _currentCacheBytes -=
+                 static_cast<std::uint32_t>(it->byteWeight);
++            eraseLayerTexture(it->layer);
+             it = _entries.erase(it);
+         }
+     }
+diff --git a/external/krkrz/plugin/motionplayer/SourceCache.h b/external/krkrz/plugin/motionplayer/SourceCache.h
+--- a/external/krkrz/plugin/motionplayer/SourceCache.h
++++ b/external/krkrz/plugin/motionplayer/SourceCache.h
+@@ -8,6 +8,7 @@
+ #include <cstdint>
+ #include <list>
+ #include <string>
++#include <unordered_map>
+ #include <utility>
+ 
+ #include "psbfile/PSBRawFile.h"
+@@ -16,6 +17,7 @@
+ 
+ class tTVPBaseBitmap;
+ using iTVPBaseBitmap = tTVPBaseBitmap;
++class tTVPBitmap;
+ class iTVPTexture2D;
+ 
+ namespace motion {
+@@ -73,16 +75,26 @@ namespace motion {
+     private:
+         void bakeSource_guess(iTJSDispatch2 *source, Entry &entry);
+         void trimCacheBeforeInsert_guess();
++        iTVPTexture2D *textureFromLayerVariant(
++            const tTJSVariant &value);
++        void eraseLayerTexture(const tTJSVariant &value);
+         tTJSVariant loadRawSourceVariant(const Player *player,
+                                          const ttstr &name,
+                                          std::string &resolvedKey) const;
+ 
++        struct LayerTextureCacheEntry {
++            tTVPBitmap *bitmap = nullptr;
++            iTVPTexture2D *texture = nullptr;
++        };
++
+         tTJSVariant _owner;
+         tTJSVariant _primaryLayer;
+         tTJSVariant _bufLayer;
+         std::uint32_t _currentCacheBytes = 0;
+         std::uint32_t _cacheLimitBytes = 0;
+         std::list<Entry> _entries;
++        std::unordered_map<iTJSDispatch2 *, LayerTextureCacheEntry>
++            _layerTextures;
+     };
+ 
+     // The four current references reconstruct ObjSource as a thin raw-node
+@@ -91,8 +103,9 @@ namespace motion {
+     // ABIs; those sizes are compiler layout evidence, not source constants.
+     // Every member navigates the raw node directly. The former
+     // _key/_src/_blendMode/_color fields were a port invention. Its actual
+-    // fields are precisely the retained raw owner/node pair plus lazy texture;
+-    // MASTER's older "ObjSource missing 6 members" verdict was also inverted.
++    // native fields are precisely the retained raw owner/node pair plus lazy
++    // texture; the Web port retains one tTVPBaseBitmap wrapper so krkrsdl2's
++    // CPU Layer and the Motion texture can share the same tTVPBitmap storage.
+     //
+     // ResourceManager::findSource constructs it at
+     // Kirikiroid2_1.3.9_Android_arm64-v8a.so!sub_6A7F1C,
+@@ -149,6 +162,7 @@ namespace motion {
+ 
+         PSB::PSBRawNode _source; // qword[0..1]: retained owner + raw node
+         iTVPTexture2D *_texture = nullptr; // qword[2]: retained lazy texture
++        tTVPBaseBitmap *_bitmap = nullptr; // Web CPU-layer owner wrapper
+     };
+ 
+     // Motion.Point compatibility facade.

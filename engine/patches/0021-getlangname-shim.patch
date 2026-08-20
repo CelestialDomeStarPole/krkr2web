@@ -1,15 +1,15 @@
 diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
 --- a/src/core/base/sdl2/PluginImpl.cpp
 +++ b/src/core/base/sdl2/PluginImpl.cpp
-@@ -1211,3 +1211,12 @@
- 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM motionplayer.dll"));
+@@ -1203,3 +1203,12 @@
+ 			TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_NCB_FAILED motionplayer.dll"));
  	}
 +	else if(name == TJS_W("getLangName.dll"))
 +	{
 +		TVPExecuteScript(
-+			TJS_W("if (typeof System.getCurrentUILangName == 'undefined') System.getCurrentUILangName = function() { return '日本語'; };")
-+			TJS_W("if (typeof System.getCurrentUILangTag == 'undefined') System.getCurrentUILangTag = function() { return 'ja'; };")
-+			TJS_W("if (typeof System.getCurrentLocale == 'undefined') System.getCurrentLocale = function() { return 'ja_JP'; };"),
++			TJS_W("if (typeof System.getCurrentUILangName == 'undefined') System.getCurrentUILangName = function() { var lang = System.getArgument('-krkr2web-ui-language'); if (lang === void) lang = 'ja'; lang = lang.toLowerCase(); if (lang.indexOf('zh') == 0) return 'Chinese'; if (lang.indexOf('en') == 0) return 'English'; return 'Japanese'; };")
++			TJS_W("if (typeof System.getCurrentUILangTag == 'undefined') System.getCurrentUILangTag = function() { var lang = System.getArgument('-krkr2web-ui-language'); return lang === void ? 'ja' : lang; };")
++			TJS_W("if (typeof System.getCurrentLocale == 'undefined') System.getCurrentLocale = function() { var lang = System.getArgument('-krkr2web-ui-language'); if (lang === void) return 'ja_JP'; lang = lang.toLowerCase(); if (lang.indexOf('zh') == 0) return 'zh_CN'; if (lang.indexOf('en') == 0) return 'en_US'; return 'ja_JP'; };"),
 +			TJS_W("krkr2web-getlangname-shim"), 0);
 +		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM getLangName.dll"));
 +	}

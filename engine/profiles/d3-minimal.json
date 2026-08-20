@@ -18,6 +18,9 @@
     "mode": "game-defined"
   },
   "plugins": {},
+  "runtimeCompatibility": {
+    "directKagScenario": false
+  },
   "videoStrategy": "not-used",
   "allowStartupTimeoutReady": true
 }

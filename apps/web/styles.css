@@ -9,7 +9,7 @@ button:disabled { cursor: default; opacity: .48; }
 .brand { min-width: 0; display: flex; align-items: baseline; gap: 14px; }
 .brand strong { font-size: 17px; }
 .brand span, .storage-summary span { color: #929ca4; font-size: 12px; }
-.tabs { display: grid; grid-template-columns: repeat(3, minmax(82px, 1fr)); gap: 4px; padding: 4px; border: 1px solid #3b4248; border-radius: 6px; background: #101316; }
+.tabs { display: grid; grid-template-columns: repeat(4, minmax(76px, 1fr)); gap: 4px; padding: 4px; border: 1px solid #3b4248; border-radius: 6px; background: #101316; }
 .tab { min-height: 38px; padding: 0 16px; border: 0; border-radius: 4px; background: transparent; color: #aab2b8; }
 .tab.active { background: #e7b84b; color: #18140b; font-weight: 700; }
 .storage-summary { justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
@@ -58,16 +58,43 @@ h1 { margin: 0; font-size: 25px; }
 .settings-list dd { margin: 0; font-size: 14px; }
 .settings-actions { display: flex; align-items: center; gap: 16px; margin-top: 24px; }
 .settings-actions span { color: #9ba4ab; font-size: 13px; }
-.toast { position: fixed; z-index: 30; left: 50%; bottom: 24px; max-width: min(520px, calc(100vw - 40px)); transform: translateX(-50%); padding: 12px 16px; border: 1px solid #4a535a; border-radius: 4px; background: #20262a; color: #eef0f1; box-shadow: 0 10px 32px rgba(0,0,0,.35); font-size: 13px; }
+.save-column { max-width: 1040px; margin: 0 auto; }
+.save-heading { align-items: center; }
+.save-heading-copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.save-heading-copy strong { max-width: 360px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.save-heading-copy span, .save-toolbar > span { color: #929ca4; font-size: 12px; }
+.save-toolbar { min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid #30363b; }
+.save-actions { display: flex; align-items: center; gap: 8px; }
+.save-actions .secondary, .danger-inline { min-height: 38px; padding: 0 14px; border-radius: 4px; font-weight: 700; }
+.danger-inline { border: 1px solid #754c50; background: transparent; color: #ff9299; }
+.save-table-heading, .save-row { display: grid; grid-template-columns: 44px 130px minmax(0, 1fr) 90px; align-items: center; gap: 12px; }
+.save-table-heading { min-height: 34px; padding: 0 10px; border-bottom: 1px solid #465058; color: #7f8991; font-size: 11px; }
+.save-table-heading span:last-child { text-align: right; }
+.save-list { border-bottom: 1px solid #30363b; }
+.save-row { min-height: 68px; padding: 9px 10px; border-bottom: 1px solid #30363b; color: inherit; }
+.save-row:last-child { border-bottom: 0; }
+.save-row:hover { background: #171c20; }
+.save-row input { width: 18px; height: 18px; margin: 0; accent-color: #e7b84b; }
+.save-category { justify-self: start; min-height: 26px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid #59636b; border-radius: 4px; color: #c2c9ce; font-size: 11px; }
+.save-category.quick { border-color: #756337; color: #e7c873; }
+.save-category.system { border-color: #47725c; color: #75d2a0; }
+.save-category.story { border-color: #6d526f; color: #d7a9dd; }
+.save-copy { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.save-copy strong { overflow-wrap: anywhere; font-size: 13px; }
+.save-copy span, .save-size { color: #929ca4; font-size: 11px; }
+.save-size { text-align: right; }
+.save-empty { min-height: 160px; display: grid; place-items: center; color: #929ca4; font-size: 13px; }
+.toast { position: fixed; z-index: 60; left: 50%; bottom: 24px; max-width: min(520px, calc(100vw - 40px)); transform: translateX(-50%); padding: 12px 16px; border: 1px solid #4a535a; border-radius: 4px; background: #20262a; color: #eef0f1; box-shadow: 0 10px 32px rgba(0,0,0,.35); font-size: 13px; pointer-events: none; }
 .embedded-player { position: fixed; z-index: 40; inset: 0; min-width: 0; min-height: 0; grid-template-rows: 52px minmax(0, 1fr); background: #050607; }
 .embedded-player:not([hidden]) { display: grid; }
-.player-bar { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 0 12px; border-bottom: 1px solid #30363b; background: #15191d; }
+.player-bar { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 14px; padding: 0 12px; border-bottom: 1px solid #30363b; background: #15191d; }
 .player-bar strong { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .player-bar > span { color: #9da6ad; font-size: 12px; }
 .icon-button { width: 38px; height: 38px; display: inline-grid; place-items: center; padding: 0; border: 1px solid #505960; border-radius: 4px; background: transparent; color: #f1f3f4; font-size: 22px; line-height: 1; }
+.stop-button { border-color: #754c50; color: #ff9299; font-size: 15px; }
 .player-stage { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; background: #020303; }
 .player-stage canvas { width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; display: block !important; outline: none; }
-.player-loading-panel { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(420px, calc(100% - 40px)); display: grid; gap: 8px; transform: translate(-50%, -50%); padding: 20px; border: 1px solid #41494f; border-radius: 6px; background: rgba(20, 24, 27, .96); text-align: center; }
+.player-loading-panel { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(420px, calc(100% - 40px)); display: grid; gap: 8px; transform: translate(-50%, -50%); padding: 20px; border: 1px solid #41494f; border-radius: 6px; background: rgba(20, 24, 27, .96); text-align: center; pointer-events: none; }
 .player-loading-panel strong { font-size: 17px; }
 .player-loading-panel span { color: #aab2b8; font-size: 13px; line-height: 1.5; }
 .embedded-player[data-state="ready"] .player-loading-panel { display: none; }

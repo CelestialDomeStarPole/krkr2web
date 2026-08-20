@@ -1,0 +1,16 @@
+diff --git a/external/krkrz/tjs2/tjsString.cpp b/external/krkrz/tjs2/tjsString.cpp
+--- a/external/krkrz/tjs2/tjsString.cpp
++++ b/external/krkrz/tjs2/tjsString.cpp
+@@ -297,11 +297,11 @@
+ 	do
+ 	{
+ 		*(p++) = (TJS_W("0123456789ABCDEF"))[num % 16];
+ 		num /= 16;
+ 		zeropad --;
+-	} while(zeropad || num);
++	} while(zeropad > 0 || num);
+ 
+ 	p--;
+ 	while(buf <= p) *(d++) = *(p--);
+ 	*d = 0;
+ 

@@ -9,3 +9,28 @@ diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
 -#endif
  					return;
  				}
+@@ -2893,21 +2891,9 @@
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+ static int sdl_event_watch(void *userdata, SDL_Event *in_event)
+ {
+-	SDL_Event event;
+-	SDL_memcpy(&event, in_event, sizeof(SDL_Event));
+-#if defined(_WIN32) && defined(KRKRSDL2_USE_WIN32_EVENT_QUEUE)
+-#else
+-	if (event.type == NativeEventQueueImplement::native_event_queue_custom_event_type)
+-	{
+-		return 1;
+-	}
+-#endif
+-	if (_currentWindowWindow && _currentWindowWindow->window_receive_event_input(event) && TVPSystemControl)
+-	{
+-		// process events now
+-		// Some JS functions will only work in e.g. mouse down callback due to browser restrictions
+-		TVPSystemControl->ApplicationIdle();
+-	}
++	(void)userdata;
++	(void)in_event;
++	// Input is delivered from the next main-loop tick so Asyncify can suspend safely.
+ 	return 1;
+ }
+ #endif

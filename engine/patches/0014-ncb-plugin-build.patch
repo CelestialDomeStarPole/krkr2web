@@ -1,7 +1,7 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -166,4 +166,17 @@
+@@ -166,4 +166,57 @@
  endif()
  
 +if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
@@ -17,5 +17,91 @@ diff --git a/CMakeLists.txt b/CMakeLists.txt
 +)
 +endif()
 +
++if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
++# Locked kirikiroid2-web Motion/Emote runtime with lazy PSB ownership.
++list(APPEND KRKRSDL2COMMON_SRC
++	external/krkrz/plugin/motionplayer/main.cpp
++	external/krkrz/plugin/motionplayer/EmotePlayer.cpp
++	external/krkrz/plugin/motionplayer/EmoteEngine.cpp
++	external/krkrz/plugin/motionplayer/EmoteSpring.cpp
++	external/krkrz/plugin/motionplayer/EmoteVarController.cpp
++	external/krkrz/plugin/motionplayer/EmoteAngleController.cpp
++	external/krkrz/plugin/motionplayer/EmoteMeshResolver.cpp
++	external/krkrz/plugin/motionplayer/EmoteBlinkController.cpp
++	external/krkrz/plugin/motionplayer/EmoteEyebrowController.cpp
++	external/krkrz/plugin/motionplayer/EmoteMouthController.cpp
++	external/krkrz/plugin/motionplayer/EmoteSelectorController.cpp
++	external/krkrz/plugin/motionplayer/EmoteLoopController.cpp
++	external/krkrz/plugin/motionplayer/EmoteBlinkRng.cpp
++	external/krkrz/plugin/motionplayer/EmoteWindEmitter.cpp
++	external/krkrz/plugin/motionplayer/PlayerCore.cpp
++	external/krkrz/plugin/motionplayer/PlayerFrameProgress.cpp
++	external/krkrz/plugin/motionplayer/PlayerResource.cpp
++	external/krkrz/plugin/motionplayer/PlayerMotionLoad.cpp
++	external/krkrz/plugin/motionplayer/PlayerVariable.cpp
++	external/krkrz/plugin/motionplayer/PlayerTimeline.cpp
++	external/krkrz/plugin/motionplayer/PlayerLayerQuery.cpp
++	external/krkrz/plugin/motionplayer/PlayerDrawDispatch.cpp
++	external/krkrz/plugin/motionplayer/PlayerRender.cpp
++	external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
++	external/krkrz/plugin/motionplayer/PlayerRenderItems.cpp
++	external/krkrz/plugin/motionplayer/PlayerRenderExecute.cpp
++	external/krkrz/plugin/motionplayer/PlayerRenderTargets.cpp
++	external/krkrz/plugin/motionplayer/PlayerUpdateLayers.cpp
++	external/krkrz/plugin/motionplayer/PlayerUpdateLayerEval.cpp
++	external/krkrz/plugin/motionplayer/PlayerUpdateGeometry.cpp
++	external/krkrz/plugin/motionplayer/PlayerUpdateChildMotion.cpp
++	external/krkrz/plugin/motionplayer/PlayerUpdateParticles.cpp
++	external/krkrz/plugin/motionplayer/PlayerUpdateAnchor.cpp
++	external/krkrz/plugin/motionplayer/D3DAdaptor.cpp
++	external/krkrz/plugin/motionplayer/ResourceManager.cpp
++	external/krkrz/plugin/motionplayer/SourceCache.cpp
++	external/krkrz/plugin/motionplayer/RuntimeSupport.cpp
++	external/krkrz/plugin/motionplayer/NodeTree.cpp
++	external/krkrz/plugin/motionplayer/MotionNodeBridge.cpp
++	external/krkrz/plugin/motionplayer/MotionTraceWeb.cpp
++	external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
++	external/krkrz/plugin/motionplayer/SeparateLayerAdaptor.cpp
++	external/krkrz/plugin/motionplayer/MotionRenderCompat.cpp
++	external/krkrz/core/visual/ogl/imagepacker.cpp
++)
++list(APPEND KRKRSDL2COMMON_INCLUDES
++	external/krkrz/plugin/motionplayer
++)
++endif()
++
  list(APPEND KRKRSDL2_DEFINITIONS
  	TVP_COMPILING_KRKRSDL2
+diff --git a/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp b/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
+--- a/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
++++ b/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
+@@ -2,6 +2,5 @@
+ // Split from PlayerRender.cpp for maintainability.
+ //
+ #include "PlayerRenderInternal.h"
+-#include "ConfigManager/IndividualConfigManager.h"
+ #include "MotionTraceWeb.h"
+ #include "RenderManager.h"
+@@ -558,11 +557,3 @@
+     bool isAccurateSlaRenderEnabled() {
+-        auto *renderManager = TVPGetRenderManager();
+-        if(renderManager && renderManager->IsSoftware()) {
+-            return true;
+-        }
+-        auto *config = IndividualConfigManager::GetInstance();
+-        if(!config) {
+-            return false;
+-        }
+-        return config->GetValue<bool>("ogl_accurate_render", false);
++        return true;
+     }
+diff --git a/external/krkrz/plugin/motionplayer/PlayerInternal.h b/external/krkrz/plugin/motionplayer/PlayerInternal.h
+--- a/external/krkrz/plugin/motionplayer/PlayerInternal.h
++++ b/external/krkrz/plugin/motionplayer/PlayerInternal.h
+@@ -33,4 +33,6 @@
+ #include "EventIntf.h"
+ #include "ScriptMgnIntf.h"
+ #include "NodeTree.h"
++
++void TVPReverseRGB(tjs_uint32 *dest, const tjs_uint32 *src, tjs_int len);
+ #include "MotionNode.h"

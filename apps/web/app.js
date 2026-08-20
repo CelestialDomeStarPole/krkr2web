@@ -113,7 +113,11 @@
       copy.appendChild(status);
       button.appendChild(image);
       button.appendChild(copy);
-      button.addEventListener("click", function () { selectedGameId = game.gameId; render(); });
+      button.addEventListener("click", function () {
+        selectedGameId = game.gameId;
+        if (window.krkr2SaveManager) { window.krkr2SaveManager.setGame(game); }
+        render();
+      });
       elements.gameList.appendChild(button);
     });
   }
@@ -170,13 +174,30 @@
     var actions = document.createElement("div");
     actions.className = "detail-actions";
     if (isReady(game)) {
-      var play = actionButton("启动游戏", "primary", function () {
+      var playerState = window.krkr2Player.snapshot();
+      var playLabel = playerState.gameId === game.gameId && playerState.crashed ? "重新启动游戏" : "启动游戏";
+      var play = actionButton(playLabel, "primary", function () {
         var originalHref = location.href;
         window.krkr2Player.start(game.gameId, game.title).then(function () {
           if (location.href !== originalHref) { throw new Error("启动游戏时页面地址发生了变化"); }
         }).catch(function (error) { notify(error.message || String(error)); });
       }, actionPending);
       actions.appendChild(play);
+      if (playerState.gameId === game.gameId && playerState.running) {
+        actions.appendChild(actionButton("强制重启", "secondary", function () {
+          var originalHref = location.href;
+          notify("正在重新启动 " + game.title);
+          window.krkr2Player.restart(game.gameId, game.title).then(function () {
+            if (location.href !== originalHref) { throw new Error("重启游戏时页面地址发生了变化"); }
+            notify(game.title + " 已重新启动");
+          }).catch(function (error) { notify(error.message || String(error)); });
+        }, playerState.restarting));
+        actions.appendChild(actionButton("强制终止", "danger", function () {
+          window.krkr2Player.forceStop("library-action").then(function () {
+            notify(game.title + " 已强制终止");
+          }).catch(function (error) { notify(error.message || String(error)); });
+        }, playerState.stopping));
+      }
       actions.appendChild(actionButton("重新校验", "secondary", function () { verifyGame(game); }, actionPending));
     } else if (install.status === "downloading") {
       actions.appendChild(actionButton("暂停下载", "secondary", function () { pauseGame(game); }, false));
@@ -306,6 +327,16 @@
     try { estimate = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null; } catch (error) {}
     var lastPlayer = null;
     try { lastPlayer = JSON.parse(localStorage.getItem("krkr2web-d4-last-player") || "null"); } catch (error) {}
+    var engineProfiles = null;
+    try {
+      var registry = window.krkr2EngineProfiles;
+      engineProfiles = registry ? {
+        schemaVersion: registry.schemaVersion,
+        profileIds: registry.profiles ? Object.keys(registry.profiles) : null
+      } : null;
+    } catch (error) {}
+    var lastSession = null;
+    try { lastSession = JSON.parse(localStorage.getItem("krkr2web-d4-last-session") || "null"); } catch (error) {}
     var report = {
       reportVersion: 1,
       probe: "d4-product",
@@ -316,6 +347,9 @@
         selectedGameId: selectedGameId,
         installs: JSON.parse(JSON.stringify(installs)),
         samePageOffline: window.krkr2Player.snapshot(),
+        saveManager: window.krkr2SaveManager && window.krkr2SaveManager.snapshot(),
+        engineProfiles: engineProfiles,
+        lastSession: lastSession,
         storageEstimate: estimate,
         lastPlayer: lastPlayer
       }
@@ -341,6 +375,9 @@
         Array.prototype.forEach.call(document.querySelectorAll("[data-view-panel]"), function (panel) {
           panel.hidden = panel.dataset.viewPanel !== tab.dataset.view;
         });
+        if (tab.dataset.view === "saves" && window.krkr2SaveManager) {
+          window.krkr2SaveManager.refresh(selectedGame());
+        }
       });
     });
   }
@@ -348,7 +385,10 @@
   async function boot() {
     setupTabs();
     elements.upload.addEventListener("click", uploadDiagnostics);
-    window.addEventListener("krkr2-player-state", renderOfflineReady);
+    window.addEventListener("krkr2-player-state", function () {
+      renderOfflineReady();
+      if (catalog) { renderDetail(); }
+    });
     updateNetwork();
     window.addEventListener("online", updateNetwork);
     window.addEventListener("offline", updateNetwork);
@@ -358,6 +398,7 @@
     renderOfflineReady();
     window.krkr2Player.preload().catch(function () {});
     await loadCatalog();
+    if (window.krkr2SaveManager) { window.krkr2SaveManager.setGame(selectedGame()); }
     await updateStorage();
     render();
   }
@@ -368,6 +409,7 @@
       selectedGameId: selectedGameId,
       installs: JSON.parse(JSON.stringify(installs)),
       samePageOffline: window.krkr2Player.snapshot(),
+      saveManager: window.krkr2SaveManager && window.krkr2SaveManager.snapshot(),
       bootError: bootError
     };
   };

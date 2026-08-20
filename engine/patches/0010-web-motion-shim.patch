@@ -1,28 +1,10 @@
 diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
 --- a/src/core/base/sdl2/PluginImpl.cpp
 +++ b/src/core/base/sdl2/PluginImpl.cpp
-@@ -1186,5 +1186,23 @@
+@@ -1186,5 +1186,5 @@
  	else if(name == TJS_W("motionplayer.dll") &&
  		TVPGetCommandLine(TJS_W("-krkr2web-motion-bootstrap")))
  	{
 -		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_BOOTSTRAP motionplayer.dll linked"));
-+		TVPExecuteScript(
-+			TJS_W("class KRKR2WebMotionResourceManager {")
-+			TJS_W("var owner = void; var cacheSize = 0;")
-+			TJS_W("function KRKR2WebMotionResourceManager(owner, cacheSize) { this.owner = owner; this.cacheSize = cacheSize; }")
-+			TJS_W("function isExistMotion() { return false; }")
-+			TJS_W("function findMotion() { return void; }")
-+			TJS_W("function getMotion() { return void; }")
-+			TJS_W("function loadMotion() { return void; }")
-+			TJS_W("function unloadMotion() { return; }")
-+			TJS_W("function unloadAll() { return; }")
-+			TJS_W("function clearCache() { return; }")
-+			TJS_W("function finalize() { this.owner = void; }")
-+			TJS_W("}")
-+			TJS_W("if (typeof global.Motion == 'undefined') global.Motion = %[];")
-+			TJS_W("global.Motion.ResourceManager = KRKR2WebMotionResourceManager;")
-+			TJS_W("if (typeof global.Motion.Player == 'undefined') global.Motion.Player = %[];")
-+			TJS_W("if (typeof global.Motion.Player.useD3D == 'undefined') global.Motion.Player.useD3D = 0;"),
-+			TJS_W("krkr2web-motion-shim"), 0);
-+		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM motionplayer.dll"));
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_NATIVE motionplayer.dll software-layer"));
  	}

@@ -11,10 +11,16 @@ from pathlib import Path
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument(
+        "--node",
+        type=Path,
+        default=None,
+        help="optional node executable used to syntax-check the web scripts",
+    )
     args = parser.parse_args()
     root = args.directory.resolve()
     required = [
-        "index.html", "styles.css", "app.js", "player.js",
+        "index.html", "styles.css", "app.js", "player.js", "save-manager.js",
         "storage.js", "downloader.js", "catalog.json", "resource-map.json", "engine-profiles.js",
         "assets/default-cover.png", "play/index.html", "play/styles.css", "play/app.js",
         "play/storage.js", "engine/krkrsdl2.js", "engine/krkrsdl2.wasm",
@@ -41,17 +47,35 @@ def main() -> None:
 
     app = (root / "app.js").read_text(encoding="utf-8")
     player = (root / "player.js").read_text(encoding="utf-8")
+    save_manager = (root / "save-manager.js").read_text(encoding="utf-8")
     if "getLatestCatalog" not in app or "d4AppState" not in app:
         raise SystemExit("D4 library lacks local-first catalog diagnostics")
     if "setInterval(syncSaves, 30000)" not in player or "storageBridge.prepare(gameId)" not in player or "wasmBinary: wasmBinary" not in player:
         raise SystemExit("D4 player lacks local launch or periodic save sync")
     if "resolveEngineProfile" not in player or "-krkr2web-autopath=" not in player or "firstDynamicError" not in player:
         raise SystemExit("D4 player lacks engine profile mounting diagnostics")
-    if "location.href" not in app or 'actionButton("启动游戏"' not in app:
+    if "restart: restart" not in player or "forceStop: forceStop" not in player or "Browser alert:" not in player:
+        raise SystemExit("D4 player lacks same-document restart or fatal alert capture")
+    if "armAudioContextBridge" not in player or "audioContextBridgeArmed" not in player:
+        raise SystemExit("D4 player does not reuse the gesture-authorized context for OpenAL")
+    if "FILE_DATA" not in save_manager or "krkr2Player.stop" not in save_manager or "deleteEntries" not in save_manager:
+        raise SystemExit("D4 product lacks guarded IDBFS save management")
+    if "location.href" not in app or "window.krkr2Player.start(game.gameId" not in app:
         raise SystemExit("D4 library does not launch the engine in the current document")
     page = (root / "index.html").read_text(encoding="utf-8")
+    if "save-manager.js" not in page or "player-restart-button" not in page or "player-stop-button" not in page:
+        raise SystemExit("D4 product does not expose save management and forced restart")
     if "serviceWorker" in page or "/play/?gameId=" in app or "<a class=\"primary\"" in app:
         raise SystemExit("D4 product still depends on service workers or player navigation")
+    if args.node:
+        import subprocess
+
+        for script in ("storage.js", "downloader.js", "play/storage.js", "player.js", "save-manager.js", "app.js"):
+            result = subprocess.run(
+                [str(args.node), "--check", str(root / script)], capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                raise SystemExit(f"D4 web script has a syntax error: {script}: {result.stderr.strip()[:200]}")
     print(f"D4 artifacts valid: {len(catalog['games'])} game(s), {len(resources)} mapped package(s)")
 
 

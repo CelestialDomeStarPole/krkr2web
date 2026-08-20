@@ -27,9 +27,13 @@ class D2ToolsTest(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.source = self.base / "source"
         self.web = self.base / "web"
+        self.videos = self.base / "videos"
         self.reports = self.base / "reports"
         self.source.mkdir()
         self.web.mkdir()
+        (self.videos / "test-game").mkdir(parents=True)
+        self.video_bytes = bytes(range(251)) * 17
+        (self.videos / "test-game" / "opening.webm").write_bytes(self.video_bytes)
         pattern = bytes(range(256))
         self.package_bytes = pattern * ((5 * 1024 * 1024 + 37) // len(pattern))
         self.package_bytes = self.package_bytes[: 5 * 1024 * 1024 + 37]
@@ -98,6 +102,7 @@ class D2ToolsTest(unittest.TestCase):
             directory=str(self.web),
             report_directory=str(self.reports),
             resource_map=resource_map,
+            video_directory=str(self.videos),
         )
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -137,6 +142,40 @@ class D2ToolsTest(unittest.TestCase):
             response = connection.getresponse()
             response.read()
             self.assertEqual(response.status, 404)
+            connection.close()
+
+    def test_video_files_support_full_and_range_responses(self) -> None:
+        with self.running_server() as (port, _url, _resource):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+
+            connection.request("HEAD", "/videos/test-game/opening.webm")
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Accept-Ranges"), "bytes")
+            self.assertEqual(int(response.getheader("Content-Length")), len(self.video_bytes))
+
+            connection.request(
+                "GET",
+                "/videos/test-game/opening.webm",
+                headers={"Range": "bytes=101-212"},
+            )
+            response = connection.getresponse()
+            body = response.read()
+            self.assertEqual(response.status, 206)
+            self.assertEqual(response.getheader("Content-Type"), "video/webm")
+            self.assertEqual(response.getheader("Content-Range"), f"bytes 101-212/{len(self.video_bytes)}")
+            self.assertEqual(body, self.video_bytes[101:213])
+
+            connection.request(
+                "GET",
+                "/videos/test-game/opening.webm",
+                headers={"Range": "bytes=999999-"},
+            )
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(response.status, 416)
+            self.assertEqual(response.getheader("Content-Range"), f"bytes */{len(self.video_bytes)}")
             connection.close()
 
     def test_diagnostic_report_versions_one_through_five_are_accepted(self) -> None:

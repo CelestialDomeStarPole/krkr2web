@@ -1,0 +1,9 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -175,4 +175,4 @@ list(APPEND KRKRSDL2COMMON_SRC
+ 	external/krkrz/plugin/getSample.cpp
+ 	external/krkrz/plugin/scriptsEx.cpp
+-	external/krkrz/plugin/windowEx.cpp
++	external/krkrz/plugin/windowEx-web.cpp
+ 	external/krkrz/plugin/BinaryAccessor.cpp

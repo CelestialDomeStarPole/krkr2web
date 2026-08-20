@@ -15,9 +15,10 @@ REQUIRED_RUNTIME = {
     "initialWasmMemoryBytes": 64 * 1024 * 1024,
     "maximumWasmMemoryBytes": 512 * 1024 * 1024,
     "indexedDbChunkBytes": 4 * 1024 * 1024,
-    "indexedDbCacheChunks": 4,
     "xp3SegmentCacheBytes": 1024 * 1024,
 }
+MIN_INDEXED_DB_CACHE_CHUNKS = 4
+MAX_INDEXED_DB_CACHE_CHUNKS = 16
 
 
 def _fail(path: Path, message: str) -> None:
@@ -58,12 +59,29 @@ def validate_profile(value: object, path: Path) -> dict:
         not isinstance(argument, str) or not argument.startswith("-") for argument in arguments
     ):
         _fail(path, "engineArguments must contain option strings")
-    if value.get("runtime") != REQUIRED_RUNTIME:
+    runtime = value.get("runtime")
+    if not isinstance(runtime, dict):
         _fail(path, "runtime limits do not match the Chrome 89 low-memory gate")
+    fixed_runtime = {key: runtime.get(key) for key in REQUIRED_RUNTIME}
+    if fixed_runtime != REQUIRED_RUNTIME or set(runtime) != {*REQUIRED_RUNTIME, "indexedDbCacheChunks"}:
+        _fail(path, "runtime limits do not match the Chrome 89 low-memory gate")
+    cache_chunks = runtime.get("indexedDbCacheChunks")
+    if (
+        not isinstance(cache_chunks, int)
+        or isinstance(cache_chunks, bool)
+        or not MIN_INDEXED_DB_CACHE_CHUNKS <= cache_chunks <= MAX_INDEXED_DB_CACHE_CHUNKS
+    ):
+        _fail(
+            path,
+            f"runtime.indexedDbCacheChunks must be {MIN_INDEXED_DB_CACHE_CHUNKS}..{MAX_INDEXED_DB_CACHE_CHUNKS}",
+        )
     if not isinstance(value.get("display"), dict):
         _fail(path, "display must be an object")
     if not isinstance(value.get("plugins"), dict):
         _fail(path, "plugins must be an object")
+    compatibility = value.get("runtimeCompatibility")
+    if not isinstance(compatibility, dict) or not isinstance(compatibility.get("directKagScenario"), bool):
+        _fail(path, "runtimeCompatibility.directKagScenario must be boolean")
     if not isinstance(value.get("videoStrategy"), str):
         _fail(path, "videoStrategy must be a string")
     if not isinstance(value.get("allowStartupTimeoutReady"), bool):

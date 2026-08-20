@@ -1,0 +1,10 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -164,6 +164,7 @@
+ 
+ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+ list(APPEND KRKRSDL2COMMON_SRC src/plugins/kremscripten.cpp)
++list(APPEND KRKRSDL2COMMON_SRC external/krkrz/web/AsyncHtml5Callback.cpp)
+ list(APPEND KRKRSDL2COMMON_SRC external/krkrz/sound/OggVorbisDecoder.cpp)
+ endif()

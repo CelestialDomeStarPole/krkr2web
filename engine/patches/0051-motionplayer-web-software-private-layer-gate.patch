@@ -1,0 +1,46 @@
+diff --git a/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp b/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
+--- a/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
++++ b/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
+@@ -1,5 +1,35 @@
+ #include "PrivateMotionGLL.h"
+ 
++#if defined(__EMSCRIPTEN__)
++
++// Web builds use motionplayer's accurate software-Layer route. krkr2's
++// private GLLayer relies on the newer GPU Layer ABI and is never selected by
++// isAccurateSlaRenderEnabled(), but these symbols remain referenced by the
++// shared render dispatcher.
++namespace motion {
++    iTJSDispatch2 *ensurePrivateMotionGLLLike_0x6D5948(
++        SeparateLayerAdaptor &, const tTJSVariant &, const tTJSVariant &,
++        iTJSDispatch2 *, int, int) {
++        return nullptr;
++    }
++
++    tTJSNI_BaseLayer *
++    resolvePrivateMotionGLLNativeLike_0x6DE24C(iTJSDispatch2 *) {
++        return nullptr;
++    }
++
++    void clearPrivateMotionGLLRenderQueueLike_0x6DE738(iTJSDispatch2 *) {}
++
++    void appendPrivateMotionGLLRenderItemLike_0x6DE738(
++        iTJSDispatch2 *, const PrivateMotionGLLRenderItemInputLike_0x6DE738 &) {}
++
++    std::size_t
++    privateMotionGLLRenderQueueSizeLike_0x6DE738(iTJSDispatch2 *) {
++        return 0;
++    }
++} // namespace motion
++
++#else
++
+ #include "LayerBitmapIntf.h"
+ #include "MsgIntf.h"
+ #include "MotionTraceWeb.h"
+@@ -981,3 +1011,5 @@
+     }
+ 
+ } // namespace motion
++
++#endif

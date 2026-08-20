@@ -1,0 +1,62 @@
+diff --git a/external/krkrz/plugin/motionplayer/ResourceManager.cpp b/external/krkrz/plugin/motionplayer/ResourceManager.cpp
+--- a/external/krkrz/plugin/motionplayer/ResourceManager.cpp
++++ b/external/krkrz/plugin/motionplayer/ResourceManager.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "ResourceManager.h"
+ #include "ScriptMgnIntf.h"
++#include "StorageIntf.h"
+ #include "tjsDictionary.h"
+ 
+ #include <cstdint>
+@@ -174,6 +175,17 @@
+         explicit EmotePSBDecryptClosure(tTJSVariant &value) :
+             closure_(value.AsObjectClosure()) {}
+ 
++        void AddRef() { ++refCount_; }
++
++        void Release() {
++            if(refCount_ == 1) {
++                delete this;
++            } else {
++                --refCount_;
++            }
++        }
++
+         ~EmotePSBDecryptClosure() { closure_.Release(); }
+ 
+         void invoke(tTJSVariant **params) const {
+@@ -183,15 +195,19 @@
+         }
+ 
+     private:
++        tjs_uint refCount_ = 1;
+         tTJSVariantClosure closure_;
+     };
+ 
+     PSB::PSBFile::OwnerFilter makeEmotePSBDecryptFuncFilter(
+         tTJSVariant &callable) {
+-        // The closure is owned by a pointer+RefCount tRefHolder control block,
+-        // then copied as the sole pointer-sized std::function capture.
+-        TJS::tRefHolder<EmotePSBDecryptClosure> closure(
+-            new EmotePSBDecryptClosure(callable));
+-        return [closure](PSB::PSBRawOwner &owner) {
++        // krkrsdl2's intrusive holder retains on construction. Transfer the
++        // object's initial reference into it before copying it into the
++        // std::function capture.
++        auto *closureObject = new EmotePSBDecryptClosure(callable);
++        TJS::tTJSRefHolder<EmotePSBDecryptClosure> closure(closureObject);
++        closureObject->Release();
++        return [closure](PSB::PSBRawOwner &owner) mutable {
+             // Current invokers 683994/5652C0/1001B94A8/1B8AB0 construct the
+             // same CBinaryAccessor shape, create {object,size} variants, call
+             // the closure with two arguments, and ignore its result.
+@@ -204,7 +220,7 @@
+             // observable leak boundary.
+             tTJSVariant sizeValue(static_cast<tjs_int64>(owner.GetSize()));
+             tTJSVariant *params[] = { &accessorValue, &sizeValue };
+-            closure->invoke(params);
++            closure.GetObjectNoAddRef()->invoke(params);
+         };
+     }
+ 

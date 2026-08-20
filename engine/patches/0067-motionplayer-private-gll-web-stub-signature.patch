@@ -1,0 +1,13 @@
+diff --git a/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp b/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
+--- a/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
++++ b/external/krkrz/plugin/motionplayer/PrivateMotionGLL.cpp
+@@ -20,7 +20,8 @@ namespace motion {
+     void clearPrivateMotionGLLRenderQueueLike_0x6DE738(iTJSDispatch2 *) {}
+ 
+     void appendPrivateMotionGLLRenderItemLike_0x6DE738(
+-        iTJSDispatch2 *, const PrivateMotionGLLRenderItemInputLike_0x6DE738 &) {}
++        iTJSDispatch2 *, const PrivateMotionGLLRenderItemInputLike_0x6DE738 &,
++        std::vector<detail::MeshPoint> *) {}
+ 
+     std::size_t
+     privateMotionGLLRenderQueueSizeLike_0x6DE738(iTJSDispatch2 *) {

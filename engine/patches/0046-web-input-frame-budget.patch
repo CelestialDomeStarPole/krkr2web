@@ -1,0 +1,46 @@
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -2869,8 +2869,25 @@ void sdl_process_events()
+ 		return;
+ 	}
+ 	SDL_Event event;
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++	// Android krkr2 advances touch state once per frame. Bound the SDL queue
++	// similarly so a tap/motion burst cannot monopolize the browser main loop.
++	static const int max_events_per_tick = 24;
++	int processed_events = 0;
++	bool delivered_mouse_motion = false;
++	while(processed_events < max_events_per_tick && SDL_PollEvent(&event))
++#else
+ 	while (SDL_PollEvent(&event))
++#endif
+ 	{
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++		processed_events++;
++		if(event.type == SDL_MOUSEMOTION)
++		{
++			if(delivered_mouse_motion) continue;
++			delivered_mouse_motion = true;
++		}
++#endif
+ #if defined(_WIN32) && defined(KRKRSDL2_USE_WIN32_EVENT_QUEUE)
+ #else
+ 		if (event.type == NativeEventQueueImplement::native_event_queue_custom_event_type)
+@@ -2892,4 +2909,16 @@ void sdl_process_events()
+ 			Application->Terminate();
+ 		}
+ 	}
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++	if(processed_events == max_events_per_tick && SDL_HasEvents(SDL_FIRSTEVENT, SDL_LASTEVENT))
++	{
++		static Uint32 last_budget_log = 0;
++		Uint32 now = SDL_GetTicks();
++		if(now - last_budget_log >= 5000)
++		{
++			last_budget_log = now;
++			TVPAddLog(ttstr(TJS_W("KRKR2WEB_D5_INPUT_BUDGET queue deferred to next frame")));
++		}
++	}
++#endif
+ }

@@ -1,0 +1,570 @@
+diff --git a/external/krkrz/plugin/motionplayer/SourceCache.h b/external/krkrz/plugin/motionplayer/SourceCache.h
+--- a/external/krkrz/plugin/motionplayer/SourceCache.h
++++ b/external/krkrz/plugin/motionplayer/SourceCache.h
+@@ -17,3 +17,3 @@
+-class iTVPBaseBitmap;
++class tTVPBaseBitmap;
++using iTVPBaseBitmap = tTVPBaseBitmap;
+ class iTVPTexture2D;
+-class tTVPBaseBitmap;
+diff --git a/external/krkrz/visual/LayerIntf.h b/external/krkrz/visual/LayerIntf.h
+--- a/external/krkrz/visual/LayerIntf.h
++++ b/external/krkrz/visual/LayerIntf.h
+@@ -756,6 +756,24 @@
+ 	void AffineCopy(const tTVPPointD *points, tTVPBaseBitmap *src,
+ 		const tTVPRect &srcrect, tTVPBBStretchType mode = stNearest, bool clear = false);
+ 
++	void BezierPatchCopy(const tTVPPointD *points, tjs_int divx, tjs_int divy,
++		tTVPBaseBitmap *src, const tTVPRect &srcrect,
++		tTVPBBStretchType mode = stNearest, bool clear = false);
++
++	void MeshCopy(const tTVPPointD *points, tjs_int divx, tjs_int divy,
++		tTVPBaseBitmap *src, const tTVPRect &srcrect,
++		tTVPBBStretchType mode = stNearest, bool clear = false);
++
++	void OperateBezierPatch(const tTVPPointD *points, tjs_int divx,
++		tjs_int divy, tTVPBaseBitmap *src, const tTVPRect &srcrect,
++		tTVPBlendOperationMode mode = omAuto, tjs_int opacity = 255,
++		tTVPBBStretchType type = stNearest, bool clear = false);
++
++	void OperateMesh(const tTVPPointD *points, tjs_int divx, tjs_int divy,
++		tTVPBaseBitmap *src, const tTVPRect &srcrect,
++		tTVPBlendOperationMode mode = omAuto, tjs_int opacity = 255,
++		tTVPBBStretchType type = stNearest, bool clear = false);
++
+ 	void OperateRect(tjs_int dx, tjs_int dy, tTVPBaseBitmap *src,
+ 		const tTVPRect &rect, tTVPBlendOperationMode mode = omAuto,
+ 			tjs_int opacity = 255);
+diff --git a/external/krkrz/visual/LayerIntf.cpp b/external/krkrz/visual/LayerIntf.cpp
+--- a/external/krkrz/visual/LayerIntf.cpp
++++ b/external/krkrz/visual/LayerIntf.cpp
+@@ -13,6 +13,9 @@
+ #include <math.h>
++#include <algorithm>
+ #include <cstdlib>
+ #include <cmath>
++#include <cstring>
++#include <vector>
+ 
+ #include "tjsArray.h"
+ #include "LayerIntf.h"
+@@ -4356,6 +4359,519 @@
+ 	}
+ }
+ //---------------------------------------------------------------------------
++// CPU mesh path used by MotionPlayer on renderers without Layer GPU meshes.
++namespace {
++struct tTVPMotionMeshVertex {
++	double x;
++	double y;
++	double u;
++	double v;
++};
++
++struct tTVPMotionMeshSampler {
++	const tjs_uint8 *Bits;
++	tjs_int Pitch;
++	tjs_int BitmapWidth;
++	tjs_int BitmapHeight;
++	tTVPRect Rect;
++	bool Linear;
++	bool RefNoClip;
++};
++
++static double TVPMotionMeshEdge(const tTVPMotionMeshVertex &a,
++	const tTVPMotionMeshVertex &b, double x, double y)
++{
++	return (b.x - a.x) * (y - a.y) -
++		(b.y - a.y) * (x - a.x);
++}
++
++static bool TVPMotionMeshTopLeft(const tTVPMotionMeshVertex &a,
++	const tTVPMotionMeshVertex &b)
++{
++	const double dx = b.x - a.x;
++	const double dy = b.y - a.y;
++	return dy < 0.0 || (dy == 0.0 && dx > 0.0);
++}
++
++static bool TVPMotionMeshInside(double edge, bool topLeft)
++{
++	return edge > 0.0 || (edge == 0.0 && topLeft);
++}
++
++static tjs_int TVPMotionMeshClamp(tjs_int value, tjs_int low, tjs_int high)
++{
++	return value < low ? low : (value > high ? high : value);
++}
++
++static tjs_uint32 TVPMotionMeshReadPixel(const tTVPMotionMeshSampler &sampler,
++	tjs_int x, tjs_int y)
++{
++	const auto *line = reinterpret_cast<const tjs_uint32 *>(
++		sampler.Bits + static_cast<ptrdiff_t>(y) * sampler.Pitch);
++	return line[x];
++}
++
++static tjs_uint32 TVPMotionMeshSample(const tTVPMotionMeshSampler &sampler,
++	double u, double v)
++{
++	const tjs_int minX = sampler.RefNoClip ? 0 : sampler.Rect.left;
++	const tjs_int minY = sampler.RefNoClip ? 0 : sampler.Rect.top;
++	const tjs_int maxX = sampler.RefNoClip ? sampler.BitmapWidth - 1 :
++		sampler.Rect.right - 1;
++	const tjs_int maxY = sampler.RefNoClip ? sampler.BitmapHeight - 1 :
++		sampler.Rect.bottom - 1;
++
++	if(!sampler.Linear) {
++		const tjs_int x = TVPMotionMeshClamp(
++			static_cast<tjs_int>(std::floor(u + 0.5)), minX, maxX);
++		const tjs_int y = TVPMotionMeshClamp(
++			static_cast<tjs_int>(std::floor(v + 0.5)), minY, maxY);
++		return TVPMotionMeshReadPixel(sampler, x, y);
++	}
++
++	const double floorU = std::floor(u);
++	const double floorV = std::floor(v);
++	const tjs_int rawX = static_cast<tjs_int>(floorU);
++	const tjs_int rawY = static_cast<tjs_int>(floorV);
++	const tjs_int x0 = TVPMotionMeshClamp(rawX, minX, maxX);
++	const tjs_int y0 = TVPMotionMeshClamp(rawY, minY, maxY);
++	const tjs_int x1 = TVPMotionMeshClamp(rawX + 1, minX, maxX);
++	const tjs_int y1 = TVPMotionMeshClamp(rawY + 1, minY, maxY);
++	const tjs_int blendX = TVPMotionMeshClamp(
++		static_cast<tjs_int>((u - floorU) * 256.0), 0, 255);
++	const tjs_int blendY = TVPMotionMeshClamp(
++		static_cast<tjs_int>((v - floorV) * 256.0), 0, 255);
++	const tjs_uint32 c00 = TVPMotionMeshReadPixel(sampler, x0, y0);
++	const tjs_uint32 c01 = TVPMotionMeshReadPixel(sampler, x1, y0);
++	const tjs_uint32 c10 = TVPMotionMeshReadPixel(sampler, x0, y1);
++	const tjs_uint32 c11 = TVPMotionMeshReadPixel(sampler, x1, y1);
++	return TVPBlendARGB(TVPBlendARGB(c00, c01, blendX),
++		TVPBlendARGB(c10, c11, blendX), blendY);
++}
++
++#define TVP_MOTION_MESH_BLEND4(name)                                      \
++	do {                                                                   \
++		if(opacity == 255) {                                                \
++			if(holdAlpha) name##_HDA(dest, source, length);                  \
++			else name(dest, source, length);                                 \
++		} else {                                                            \
++			if(holdAlpha) name##_HDA_o(dest, source, length, opacity);        \
++			else name##_o(dest, source, length, opacity);                     \
++		}                                                                   \
++		return true;                                                        \
++	} while(false)
++
++static bool TVPMotionMeshBlendSpan(tjs_uint32 *dest,
++	const tjs_uint32 *source, tjs_int length, tTVPBBBltMethod method,
++	tjs_int opacity, bool holdAlpha)
++{
++	if(length <= 0) return false;
++	switch(method) {
++	case bmCopy:
++		if(opacity == 255) {
++			if(holdAlpha) TVPCopyColor(dest, source, length);
++			else std::memcpy(dest, source,
++				static_cast<size_t>(length) * sizeof(tjs_uint32));
++		} else if(holdAlpha) {
++			TVPConstAlphaBlend_HDA(dest, source, length, opacity);
++		} else {
++			TVPConstAlphaBlend(dest, source, length, opacity);
++		}
++		return true;
++	case bmCopyOnAlpha:
++		if(opacity == 255) TVPCopyOpaqueImage(dest, source, length);
++		else TVPConstAlphaBlend_d(dest, source, length, opacity);
++		return true;
++	case bmAlpha:
++		TVP_MOTION_MESH_BLEND4(TVPAlphaBlend);
++	case bmAlphaOnAlpha:
++		if(opacity == 255) TVPAlphaBlend_d(dest, source, length);
++		else TVPAlphaBlend_do(dest, source, length, opacity);
++		return true;
++	case bmAdd:
++		TVP_MOTION_MESH_BLEND4(TVPAddBlend);
++	case bmSub:
++		TVP_MOTION_MESH_BLEND4(TVPSubBlend);
++	case bmMul:
++		TVP_MOTION_MESH_BLEND4(TVPMulBlend);
++	case bmDodge:
++		TVP_MOTION_MESH_BLEND4(TVPColorDodgeBlend);
++	case bmDarken:
++		TVP_MOTION_MESH_BLEND4(TVPDarkenBlend);
++	case bmLighten:
++		TVP_MOTION_MESH_BLEND4(TVPLightenBlend);
++	case bmScreen:
++		TVP_MOTION_MESH_BLEND4(TVPScreenBlend);
++	case bmAddAlpha:
++		TVP_MOTION_MESH_BLEND4(TVPAdditiveAlphaBlend);
++	case bmAddAlphaOnAddAlpha:
++		if(opacity == 255) TVPAdditiveAlphaBlend_a(dest, source, length);
++		else TVPAdditiveAlphaBlend_ao(dest, source, length, opacity);
++		return true;
++	case bmAddAlphaOnAlpha:
++		return false;
++	case bmAlphaOnAddAlpha:
++		if(opacity == 255) TVPAlphaBlend_a(dest, source, length);
++		else TVPAlphaBlend_ao(dest, source, length, opacity);
++		return true;
++	case bmCopyOnAddAlpha:
++		if(opacity == 255) TVPCopyOpaqueImage(dest, source, length);
++		else TVPConstAlphaBlend_a(dest, source, length, opacity);
++		return true;
++	case bmPsNormal:
++		TVP_MOTION_MESH_BLEND4(TVPPsAlphaBlend);
++	case bmPsAdditive:
++		TVP_MOTION_MESH_BLEND4(TVPPsAddBlend);
++	case bmPsSubtractive:
++		TVP_MOTION_MESH_BLEND4(TVPPsSubBlend);
++	case bmPsMultiplicative:
++		TVP_MOTION_MESH_BLEND4(TVPPsMulBlend);
++	case bmPsScreen:
++		TVP_MOTION_MESH_BLEND4(TVPPsScreenBlend);
++	case bmPsOverlay:
++		TVP_MOTION_MESH_BLEND4(TVPPsOverlayBlend);
++	case bmPsHardLight:
++		TVP_MOTION_MESH_BLEND4(TVPPsHardLightBlend);
++	case bmPsSoftLight:
++		TVP_MOTION_MESH_BLEND4(TVPPsSoftLightBlend);
++	case bmPsColorDodge:
++		TVP_MOTION_MESH_BLEND4(TVPPsColorDodgeBlend);
++	case bmPsColorDodge5:
++		TVP_MOTION_MESH_BLEND4(TVPPsColorDodge5Blend);
++	case bmPsColorBurn:
++		TVP_MOTION_MESH_BLEND4(TVPPsColorBurnBlend);
++	case bmPsLighten:
++		TVP_MOTION_MESH_BLEND4(TVPPsLightenBlend);
++	case bmPsDarken:
++		TVP_MOTION_MESH_BLEND4(TVPPsDarkenBlend);
++	case bmPsDifference:
++		TVP_MOTION_MESH_BLEND4(TVPPsDiffBlend);
++	case bmPsDifference5:
++		TVP_MOTION_MESH_BLEND4(TVPPsDiff5Blend);
++	case bmPsExclusion:
++		TVP_MOTION_MESH_BLEND4(TVPPsExclusionBlend);
++	default:
++		return false;
++	}
++}
++
++static void TVPMotionMeshAppendRect(tTVPRect &dirty, bool &updated,
++	tjs_int left, tjs_int top, tjs_int right, tjs_int bottom)
++{
++	if(!updated) {
++		dirty = tTVPRect(left, top, right, bottom);
++		updated = true;
++	} else {
++		if(left < dirty.left) dirty.left = left;
++		if(top < dirty.top) dirty.top = top;
++		if(right > dirty.right) dirty.right = right;
++		if(bottom > dirty.bottom) dirty.bottom = bottom;
++	}
++}
++
++static void TVPRasterMotionMeshTriangle(tjs_uint8 *destBits,
++	tjs_int destPitch, const tTVPRect &clip,
++	tTVPMotionMeshVertex v0, tTVPMotionMeshVertex v1,
++	tTVPMotionMeshVertex v2, const tTVPMotionMeshSampler &sampler,
++	tTVPBBBltMethod method, tjs_int opacity, bool holdAlpha,
++	std::vector<tjs_uint32> &span, tTVPRect &dirty, bool &updated)
++{
++	double area = TVPMotionMeshEdge(v0, v1, v2.x, v2.y);
++	if(!std::isfinite(area) || std::abs(area) < 1.0e-12) return;
++	if(area < 0.0) { std::swap(v1, v2); area = -area; }
++	const double minX = std::min(v0.x, std::min(v1.x, v2.x));
++	const double maxX = std::max(v0.x, std::max(v1.x, v2.x));
++	const double minY = std::min(v0.y, std::min(v1.y, v2.y));
++	const double maxY = std::max(v0.y, std::max(v1.y, v2.y));
++	if(!std::isfinite(minX) || !std::isfinite(maxX) ||
++		!std::isfinite(minY) || !std::isfinite(maxY)) return;
++	const double firstX = std::ceil(minX - 0.5);
++	const double lastX = std::floor(maxX - 0.5);
++	const double firstY = std::ceil(minY - 0.5);
++	const double lastY = std::floor(maxY - 0.5);
++	if(lastX < clip.left || firstX >= clip.right ||
++		lastY < clip.top || firstY >= clip.bottom) return;
++	const tjs_int xb = firstX <= clip.left ? clip.left :
++		static_cast<tjs_int>(firstX);
++	const tjs_int xe = lastX >= clip.right - 1 ? clip.right - 1 :
++		static_cast<tjs_int>(lastX);
++	const tjs_int yb = firstY <= clip.top ? clip.top :
++		static_cast<tjs_int>(firstY);
++	const tjs_int ye = lastY >= clip.bottom - 1 ? clip.bottom - 1 :
++		static_cast<tjs_int>(lastY);
++	const bool tl0 = TVPMotionMeshTopLeft(v1, v2);
++	const bool tl1 = TVPMotionMeshTopLeft(v2, v0);
++	const bool tl2 = TVPMotionMeshTopLeft(v0, v1);
++	const double dw0 = -(v2.y - v1.y);
++	const double dw1 = -(v0.y - v2.y);
++	const double dw2 = -(v1.y - v0.y);
++	const double invArea = 1.0 / area;
++	const double du = (dw0 * v0.u + dw1 * v1.u + dw2 * v2.u) * invArea;
++	const double dv = (dw0 * v0.v + dw1 * v1.v + dw2 * v2.v) * invArea;
++	for(tjs_int y = yb; y <= ye; ++y) {
++		const double px = static_cast<double>(xb) + 0.5;
++		const double py = static_cast<double>(y) + 0.5;
++		double w0 = TVPMotionMeshEdge(v1, v2, px, py);
++		double w1 = TVPMotionMeshEdge(v2, v0, px, py);
++		double w2 = TVPMotionMeshEdge(v0, v1, px, py);
++		double u = (w0 * v0.u + w1 * v1.u + w2 * v2.u) * invArea;
++		double v = (w0 * v0.v + w1 * v1.v + w2 * v2.v) * invArea;
++		tjs_int start = -1;
++		tjs_int length = 0;
++		for(tjs_int x = xb; x <= xe; ++x) {
++			const bool inside = TVPMotionMeshInside(w0, tl0) &&
++				TVPMotionMeshInside(w1, tl1) &&
++				TVPMotionMeshInside(w2, tl2);
++			if(inside) {
++				if(start < 0) start = x;
++				span[static_cast<size_t>(length++)] =
++					TVPMotionMeshSample(sampler, u, v);
++			} else if(start >= 0) break;
++			w0 += dw0; w1 += dw1; w2 += dw2; u += du; v += dv;
++		}
++		if(length > 0) {
++			auto *dest = reinterpret_cast<tjs_uint32 *>(
++				destBits + static_cast<ptrdiff_t>(y - clip.top) * destPitch) +
++				start;
++			if(TVPMotionMeshBlendSpan(dest, span.data(), length, method,
++				opacity, holdAlpha))
++				TVPMotionMeshAppendRect(dirty, updated, start, y,
++					start + length, y + 1);
++		}
++	}
++}
++
++static bool TVPRasterMotionMesh(tTVPBaseBitmap *dest,
++	const tTVPRect &destClip, const tTVPPointD *points, tjs_int divx,
++	tjs_int divy, const tTVPBaseBitmap *source, const tTVPRect &sourceRect,
++	tTVPBBBltMethod method, tjs_int opacity, bool holdAlpha,
++	tTVPBBStretchType type, bool clear, tjs_uint32 clearColor,
++	tTVPRect &dirty)
++{
++	if(!dest || !source || !points || divx < 1 || divy < 1 ||
++		!dest->Is32BPP() || !source->Is32BPP()) return false;
++	if(sourceRect.left >= sourceRect.right || sourceRect.top >= sourceRect.bottom)
++		return false;
++	if(sourceRect.left < 0 || sourceRect.top < 0 ||
++		sourceRect.right > static_cast<tjs_int>(source->GetWidth()) ||
++		sourceRect.bottom > static_cast<tjs_int>(source->GetHeight()))
++		TVPThrowExceptionMessage(TVPOutOfRectangle);
++
++	tTVPRect clip;
++	const tTVPRect bitmapRect(0, 0, static_cast<tjs_int>(dest->GetWidth()),
++		static_cast<tjs_int>(dest->GetHeight()));
++	if(!TVPIntersectRect(&clip, destClip, bitmapRect)) return false;
++
++	const auto *sourceBits = static_cast<const tjs_uint8 *>(source->GetScanLine(0));
++	auto *destBits = static_cast<tjs_uint8 *>(dest->GetScanLineForWrite(clip.top));
++	const tjs_int destPitch = dest->GetPitchBytes();
++	const tjs_int sourcePitch = source->GetPitchBytes();
++	const tjs_int typeValue = static_cast<tjs_int>(type);
++	tTVPMotionMeshSampler sampler = {
++		sourceBits, sourcePitch, static_cast<tjs_int>(source->GetWidth()),
++		static_cast<tjs_int>(source->GetHeight()), sourceRect,
++		(typeValue & static_cast<tjs_int>(stTypeMask)) >= stFastLinear,
++		(typeValue & static_cast<tjs_int>(stRefNoClip)) != 0
++	};
++
++	bool updated = false;
++	if(clear) {
++		for(tjs_int y = clip.top; y < clip.bottom; ++y) {
++			auto *line = reinterpret_cast<tjs_uint32 *>(
++				destBits + static_cast<ptrdiff_t>(y - clip.top) * destPitch) +
++				clip.left;
++			if(holdAlpha) TVPFillColor(line, clip.right - clip.left, clearColor);
++			else TVPFillARGB(line, clip.right - clip.left, clearColor);
++		}
++		dirty = clip;
++		updated = true;
++	}
++
++	std::vector<tjs_uint32> span(static_cast<size_t>(clip.right - clip.left));
++	const size_t pointColumns = static_cast<size_t>(divx) + 1;
++	const double srcLeft = static_cast<double>(sourceRect.left);
++	const double srcTop = static_cast<double>(sourceRect.top);
++	const double srcWidth = static_cast<double>(sourceRect.right - sourceRect.left);
++	const double srcHeight = static_cast<double>(sourceRect.bottom - sourceRect.top);
++
++	for(tjs_int y = 0; y < divy; ++y) {
++		const double v0 = static_cast<double>(y) / static_cast<double>(divy);
++		const double v1 = static_cast<double>(y + 1) / static_cast<double>(divy);
++		const tjs_int cellTop = static_cast<tjs_int>(
++			std::floor(srcTop + srcHeight * v0));
++		const tjs_int cellBottom = static_cast<tjs_int>(
++			std::ceil(srcTop + srcHeight * v1));
++		for(tjs_int x = 0; x < divx; ++x) {
++			const double u0 = static_cast<double>(x) / static_cast<double>(divx);
++			const double u1 = static_cast<double>(x + 1) / static_cast<double>(divx);
++			const tjs_int cellLeft = static_cast<tjs_int>(
++				std::floor(srcLeft + srcWidth * u0));
++			const tjs_int cellRight = static_cast<tjs_int>(
++				std::ceil(srcLeft + srcWidth * u1));
++			if(cellLeft >= cellRight || cellTop >= cellBottom) continue;
++
++			const size_t row = static_cast<size_t>(y) * pointColumns;
++			const size_t nextRow = row + pointColumns;
++			const size_t column = static_cast<size_t>(x);
++			const auto &p0 = points[row + column];
++			const auto &p1 = points[row + column + 1];
++			const auto &p2 = points[nextRow + column];
++			const auto &p3 = points[nextRow + column + 1];
++			const double left = static_cast<double>(cellLeft) - 0.5;
++			const double right = static_cast<double>(cellRight) - 0.5;
++			const double top = static_cast<double>(cellTop) - 0.5;
++			const double bottom = static_cast<double>(cellBottom) - 0.5;
++			tTVPMotionMeshVertex a = { p0.x, p0.y, left, top };
++			tTVPMotionMeshVertex b = { p1.x, p1.y, right, top };
++			tTVPMotionMeshVertex c = { p2.x, p2.y, left, bottom };
++			tTVPMotionMeshVertex d = { p3.x, p3.y, right, bottom };
++			TVPRasterMotionMeshTriangle(destBits, destPitch, clip, a, b, c,
++				sampler, method, opacity, holdAlpha, span, dirty, updated);
++			TVPRasterMotionMeshTriangle(destBits, destPitch, clip, d, c, b,
++				sampler, method, opacity, holdAlpha, span, dirty, updated);
++		}
++	}
++	return updated;
++}
++
++static bool TVPTessellateMotionBezier(const tTVPPointD *points,
++	tjs_int divx, tjs_int divy, std::vector<tTVPPointD> &output)
++{
++	if(!points || divx < 1 || divy < 1) return false;
++	const auto cubicBlend = [](double p0, double p1, double p2, double p3,
++		double t) {
++		const double mt = 1.0 - t;
++		return mt * mt * mt * p0 + 3.0 * mt * mt * t * p1 +
++			3.0 * mt * t * t * p2 + t * t * t * p3;
++	};
++	const size_t columns = static_cast<size_t>(divx) + 1;
++	const size_t rows = static_cast<size_t>(divy) + 1;
++	std::vector<tTVPPointD> horizontal(columns * 4);
++	for(tjs_int x = 0; x <= divx; ++x) {
++		const double u = static_cast<double>(x) / static_cast<double>(divx);
++		for(size_t row = 0; row < 4; ++row) {
++			const auto *cp = points + row * 4;
++			horizontal[row * columns + static_cast<size_t>(x)] = {
++				cubicBlend(cp[0].x, cp[1].x, cp[2].x, cp[3].x, u),
++				cubicBlend(cp[0].y, cp[1].y, cp[2].y, cp[3].y, u)
++			};
++		}
++	}
++	output.resize(columns * rows);
++	for(tjs_int y = 0; y <= divy; ++y) {
++		const double v = static_cast<double>(y) / static_cast<double>(divy);
++		for(tjs_int x = 0; x <= divx; ++x) {
++			const size_t column = static_cast<size_t>(x);
++			const auto &p0 = horizontal[column];
++			const auto &p1 = horizontal[columns + column];
++			const auto &p2 = horizontal[columns * 2 + column];
++			const auto &p3 = horizontal[columns * 3 + column];
++			output[static_cast<size_t>(y) * columns + column] = {
++				cubicBlend(p0.x, p1.x, p2.x, p3.x, v),
++				cubicBlend(p0.y, p1.y, p2.y, p3.y, v)
++			};
++		}
++	}
++	return true;
++}
++#undef TVP_MOTION_MESH_BLEND4
++} // namespace
++
++//---------------------------------------------------------------------------
++void tTJSNI_BaseLayer::BezierPatchCopy(const tTVPPointD *points, tjs_int divx,
++	tjs_int divy, tTVPBaseBitmap *src, const tTVPRect &srcrect,
++	tTVPBBStretchType type, bool clear)
++{
++	std::vector<tTVPPointD> tessellated;
++	if(!src || !TVPTessellateMotionBezier(points, divx, divy, tessellated))
++		return;
++	MeshCopy(tessellated.data(), divx, divy, src, srcrect, type, clear);
++}
++
++//---------------------------------------------------------------------------
++void tTJSNI_BaseLayer::MeshCopy(const tTVPPointD *points, tjs_int divx,
++	tjs_int divy, tTVPBaseBitmap *src, const tTVPRect &srcrect,
++	tTVPBBStretchType type, bool clear)
++{
++	if(!points || !src || divx < 1 || divy < 1) return;
++	if(DrawFace != dfAlpha && DrawFace != dfAddAlpha && DrawFace != dfOpaque)
++		TVPThrowExceptionMessage(TVPNotDrawableFaceType, TJS_W("meshCopy"));
++	if(!MainImage) TVPThrowExceptionMessage(TVPNotDrawableLayerType);
++	const bool holdAlpha = DrawFace == dfOpaque && HoldAlpha;
++	tjs_uint32 clearColor = NeutralColor;
++	if(holdAlpha) clearColor = TVPToActualColor(clearColor);
++	else clearColor = (clearColor & 0xff000000) +
++		(TVPToActualColor(clearColor & 0xffffff) & 0xffffff);
++	tTVPRect updateRect;
++	bool updated;
++	if(src == MainImage) {
++		tTVPBaseBitmap snapshot(*src);
++		updated = TVPRasterMotionMesh(MainImage, ClipRect, points, divx, divy,
++			&snapshot, srcrect, bmCopy, 255, holdAlpha, type, clear,
++			clearColor, updateRect);
++	} else {
++		updated = TVPRasterMotionMesh(MainImage, ClipRect, points, divx, divy,
++			src, srcrect, bmCopy, 255, holdAlpha, type, clear, clearColor,
++			updateRect);
++	}
++	ImageModified = updated || ImageModified;
++	if(updated) {
++		updateRect.add_offsets(ImageLeft, ImageTop);
++		Update(updateRect);
++	}
++}
++
++//---------------------------------------------------------------------------
++void tTJSNI_BaseLayer::OperateBezierPatch(const tTVPPointD *points,
++	tjs_int divx, tjs_int divy, tTVPBaseBitmap *src,
++	const tTVPRect &srcrect, tTVPBlendOperationMode mode, tjs_int opacity,
++	tTVPBBStretchType type, bool clear)
++{
++	std::vector<tTVPPointD> tessellated;
++	if(!src || !TVPTessellateMotionBezier(points, divx, divy, tessellated))
++		return;
++	OperateMesh(tessellated.data(), divx, divy, src, srcrect, mode, opacity,
++		type, clear);
++}
++
++//---------------------------------------------------------------------------
++void tTJSNI_BaseLayer::OperateMesh(const tTVPPointD *points, tjs_int divx,
++	tjs_int divy, tTVPBaseBitmap *src, const tTVPRect &srcrect,
++	tTVPBlendOperationMode mode, tjs_int opacity, tTVPBBStretchType type,
++	bool clear)
++{
++	if(!points || !src || divx < 1 || divy < 1) return;
++	if(mode == omAuto) TVPThrowExceptionMessage(TVPCannotAcceptModeAuto);
++	tTVPBBBltMethod method;
++	if(!GetBltMethodFromOperationModeAndDrawFace(method, mode))
++		TVPThrowExceptionMessage(TVPNotDrawableFaceType, TJS_W("operateMesh"));
++	if(DrawFace != dfAlpha && DrawFace != dfAddAlpha && DrawFace != dfOpaque)
++		TVPThrowExceptionMessage(TVPNotDrawableFaceType, TJS_W("operateMesh"));
++	if(!MainImage) TVPThrowExceptionMessage(TVPNotDrawableLayerType);
++	const bool holdAlpha = DrawFace == dfOpaque && HoldAlpha;
++	tjs_uint32 clearColor = NeutralColor;
++	if(holdAlpha) clearColor = TVPToActualColor(clearColor);
++	else clearColor = (clearColor & 0xff000000) +
++		(TVPToActualColor(clearColor & 0xffffff) & 0xffffff);
++	tTVPRect updateRect;
++	bool updated;
++	if(src == MainImage) {
++		tTVPBaseBitmap snapshot(*src);
++		updated = TVPRasterMotionMesh(MainImage, ClipRect, points, divx, divy,
++			&snapshot, srcrect, method, opacity, holdAlpha, type, clear,
++			clearColor, updateRect);
++	} else {
++		updated = TVPRasterMotionMesh(MainImage, ClipRect, points, divx, divy,
++			src, srcrect, method, opacity, holdAlpha, type, clear, clearColor,
++			updateRect);
++	}
++	ImageModified = updated || ImageModified;
++	if(updated) {
++		updateRect.add_offsets(ImageLeft, ImageTop);
++		Update(updateRect);
++	}
++}
++//---------------------------------------------------------------------------
+ void tTJSNI_BaseLayer::OperateRect(tjs_int dx, tjs_int dy, tTVPBaseBitmap *src,
+ 		const tTVPRect &srcrect, tTVPBlendOperationMode mode,
+ 			tjs_int opacity)

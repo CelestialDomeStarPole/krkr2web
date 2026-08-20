@@ -1,0 +1,107 @@
+diff --git a/src/core/base/sdl2/SysInitImpl.cpp b/src/core/base/sdl2/SysInitImpl.cpp
+--- a/src/core/base/sdl2/SysInitImpl.cpp
++++ b/src/core/base/sdl2/SysInitImpl.cpp
+@@ -1519,6 +1519,20 @@
+ 	// キャッシュは 512MB までに制限
+ 	if( TVPGraphicCacheSystemLimit >= 512*1024*1024 )
+ 		TVPGraphicCacheSystemLimit = 512*1024*1024;
+ 
++#ifdef __EMSCRIPTEN__
++	// krkr2web: emscripten's libc cannot report physical memory (no
++	// _SC_PHYS_PAGES data), so SDL_GetSystemRAM() returns 0 and the graphic
++	// cache stays disabled. Without it every page entry re-inflates and
++	// re-decodes its images on the main thread, stalling frames and starving
++	// the audio queue on low-end devices. Enable a conservative fixed-size
++	// cache unless -gclim requested otherwise.
++	if(TVPGraphicCacheSystemLimit == 0)
++		TVPGraphicCacheSystemLimit = 128 * 1024 * 1024;
++	if(TVPGetGraphicCacheLimit() == 0)
++		TVPSetGraphicCacheLimit(TVPGraphicCacheSystemLimit);
++	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_GRAPHIC_CACHE ")) +
++		ttstr((tjs_int)(TVPGraphicCacheSystemLimit / (1024 * 1024))));
++#endif
++
+ 	if(totalMemory <= 64*1024*1024)
+ 		TVPSetFontCacheForLowMem();
+
+diff --git a/src/core/sound/sdl2/WaveImpl.cpp b/src/core/sound/sdl2/WaveImpl.cpp
+--- a/src/core/sound/sdl2/WaveImpl.cpp
++++ b/src/core/sound/sdl2/WaveImpl.cpp
+@@ -1783,11 +1783,25 @@
+ 			if (TVPPrimarySoundBufferPlaying && time - LastFilledTick >= TVP_WSB_THREAD_SLEEP_TIME)
+ 			{
++				// krkr2web: top the OpenAL queue up within a small time
++				// budget. Appending one 125ms unit per 60ms tick barely
++				// outpaces playback, so after a main-thread stall (image
++				// decode bursts during scene transitions) the ~2s queue needs
++				// seconds to rebuild and audibly glitches. FillBuffer returns
++				// true once the queue is full, paused or ended.
++				tjs_uint32 fill_deadline = TVPGetRoughTickCount32() + 8;
+ 				std::vector<tTJSNI_WaveSoundBuffer *>::iterator i;
+ 				for(i = TVPWaveSoundBufferVector.begin();
+ 					i != TVPWaveSoundBufferVector.end(); i++)
+ 				{
+ 					if((*i)->ThreadCallbackEnabled)
+-						(*i)->FillBuffer(); // fill sound buffer
++					{
++						while(!(*i)->FillBuffer() &&
++							TVPGetRoughTickCount32() < fill_deadline)
++						{
++							// keep filling until budget or queue cap
++						}
++					}
+ 				}
+ 				LastFilledTick = time;
+ 			}
+
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -2899,6 +2899,14 @@
+ {
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++	// krkr2web: per-tick wall-time histogram, logged every 5s. Wall time
++	// includes Asyncify suspensions (XP3 DecompressionStream waits), so the
++	// numbers reflect on-device jank directly.
++	static double perf_window_start = 0.0;
++	double perf_started = emscripten_get_now();
++	if (perf_window_start == 0.0) perf_window_start = perf_started;
++#endif
+ 	try
+ 	{
+ 		try
+ 		{
+@@ -2926,6 +2934,33 @@
+ 	TVP_CATCH_AND_SHOW_SCRIPT_EXCEPTION(TJS_W("SDL event processing"));
+ 
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++	{
++		double perf_elapsed = emscripten_get_now() - perf_started;
++		static double perf_accum = 0.0, perf_max = 0.0;
++		static tjs_int perf_ticks = 0, perf_slow = 0;
++		perf_accum += perf_elapsed;
++		perf_ticks++;
++		if (perf_elapsed > perf_max) perf_max = perf_elapsed;
++		if (perf_elapsed > 50.0) perf_slow++;
++		if (perf_started - perf_window_start >= 5000.0)
++		{
++			tjs_int perf_avg = perf_ticks > 0 ? (tjs_int)(perf_accum / perf_ticks) : 0;
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PERF ticks=")) + ttstr(perf_ticks)
++				+ ttstr(TJS_W(" avg_ms=")) + ttstr(perf_avg)
++				+ ttstr(TJS_W(" max_ms=")) + ttstr((tjs_int)perf_max)
++				+ ttstr(TJS_W(" slow50=")) + ttstr(perf_slow)
++				// krkr2web: heap watermark separates "footprint exceeds the
++				// MAXIMUM_MEMORY ceiling" from unbounded growth (leak).
++				// sbrk(0) avoids the emscripten/heap.h dependency; unistd.h
++				// is already included by this file.
++				+ ttstr(TJS_W(" heap_mb=")) + ttstr((tjs_int)((size_t)sbrk(0) / (1024 * 1024))));
++			perf_accum = perf_max = 0.0;
++			perf_ticks = perf_slow = 0;
++			perf_window_start = perf_started;
++		}
++	}
++#endif
++
+ #if !defined(__EMSCRIPTEN__) || (defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__))
+ 	return true;
+ #endif

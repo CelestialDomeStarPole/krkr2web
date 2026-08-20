@@ -1,0 +1,28 @@
+diff --git a/external/krkrz/tjs2/tjs.h b/external/krkrz/tjs2/tjs.h
+--- a/external/krkrz/tjs2/tjs.h
++++ b/external/krkrz/tjs2/tjs.h
+@@ -305,6 +305,7 @@ public:
+ 	void ReadBuffer(void *buffer, tjs_uint read_size);
+ 	void WriteBuffer(const void *buffer, tjs_uint write_size);
+ 
++	tjs_uint8 ReadI8LE();
+ 	tjs_uint64 ReadI64LE(); // reads little-endian integers
+ 	tjs_uint32 ReadI32LE();
+ 	tjs_uint16 ReadI16LE();
+diff --git a/external/krkrz/tjs2/tjs.cpp b/external/krkrz/tjs2/tjs.cpp
+--- a/external/krkrz/tjs2/tjs.cpp
++++ b/external/krkrz/tjs2/tjs.cpp
+@@ -706,6 +706,13 @@ void tTJSBinaryStream::WriteBuffer(const void *buffer, tjs_uint write_size)
+ 		TJS_eTJSError(TJSWriteError);
+ }
+ //---------------------------------------------------------------------------
++tjs_uint8 tTJSBinaryStream::ReadI8LE()
++{
++	tjs_uint8 temp;
++	ReadBuffer(&temp, 1);
++	return temp;
++}
++//---------------------------------------------------------------------------
+ tjs_uint64 tTJSBinaryStream::ReadI64LE()
+ {
+ #if TJS_HOST_IS_BIG_ENDIAN

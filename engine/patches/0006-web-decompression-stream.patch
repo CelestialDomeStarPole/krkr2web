@@ -2,7 +2,7 @@ diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive
 index ea98c1b..3355ca0 100644
 --- a/external/krkrz/base/XP3Archive.cpp
 +++ b/external/krkrz/base/XP3Archive.cpp
-@@ -27,6 +27,47 @@
+@@ -27,6 +27,100 @@
  #endif
  #include <algorithm>
  
@@ -12,25 +12,78 @@ index ea98c1b..3355ca0 100644
 +EM_ASYNC_JS(int, krkr2web_uncompress,
 +	(unsigned char *destination, unsigned long *destination_length,
 +	 const unsigned char *source, unsigned long source_length), {
-+	if (typeof DecompressionStream !== "function") {
-+		if (Module.printErr) Module.printErr("KRKR2WEB_E_DECOMPRESSION_STREAM_UNAVAILABLE");
-+		return -2;
-+	}
++	var capacity = HEAPU32[destination_length >>> 2];
++	var trace = {
++		op: "xp3-decompress-worker",
++		detail: source_length + " -> " + capacity + " bytes",
++		startedAt: Date.now()
++	};
++	globalThis.krkr2webAsyncTrace = trace;
++	var worker = null;
++	var timer = 0;
 +	try {
++		if (typeof Worker !== "function" || typeof Blob !== "function") {
++			throw new Error("Web Worker unavailable");
++		}
 +		var input = HEAPU8.slice(source, source + source_length);
-+		var stream = new Blob([input]).stream().pipeThrough(new DecompressionStream("deflate"));
-+		var output = new Uint8Array(await new Response(stream).arrayBuffer());
-+		var capacity = HEAPU32[destination_length >> 2];
++		var workerCode = [
++			"self.onmessage = async function(event) {",
++			"  try {",
++			"    if (typeof DecompressionStream !== 'function') throw new Error('DecompressionStream unavailable');",
++			"    var stream = new Blob([event.data]).stream().pipeThrough(new DecompressionStream('deflate'));",
++			"    var output = await new Response(stream).arrayBuffer();",
++			"    self.postMessage({ output: output }, [output]);",
++			"  } catch (error) {",
++			"    self.postMessage({ error: error && error.message ? error.message : String(error) });",
++			"  }",
++			"};"
++		].join("\n");
++		var workerUrl = URL.createObjectURL(new Blob([workerCode], { type: "text/javascript" }));
++		try {
++			worker = new Worker(workerUrl);
++		} finally {
++			URL.revokeObjectURL(workerUrl);
++		}
++		if (source_length >= 1048576 && Module.print) {
++			Module.print("KRKR2WEB_XP3_WORKER_BEGIN input=" + source_length + " output=" + capacity);
++		}
++		var outputBuffer = await new Promise(function(resolve, reject) {
++			timer = setTimeout(function() {
++				reject(new Error("XP3 decompression worker timeout after 15000 ms"));
++			}, 15000);
++			worker.onmessage = function(event) {
++				if (event.data && event.data.error) {
++					reject(new Error(event.data.error));
++				} else if (event.data && event.data.output) {
++					resolve(event.data.output);
++				} else {
++					reject(new Error("XP3 decompression worker returned no output"));
++				}
++			};
++			worker.onerror = function(event) {
++				reject(new Error(event.message || "XP3 decompression worker failed"));
++			};
++			worker.postMessage(input.buffer, [input.buffer]);
++		});
++		var output = new Uint8Array(outputBuffer);
 +		if (output.byteLength > capacity) return -5;
 +		HEAPU8.set(output, destination);
-+		HEAPU32[destination_length >> 2] = output.byteLength;
++		HEAPU32[destination_length >>> 2] = output.byteLength;
++		if (source_length >= 1048576 && Module.print) {
++			Module.print("KRKR2WEB_XP3_WORKER_END input=" + source_length + " output=" + output.byteLength +
++				" elapsedMs=" + (Date.now() - trace.startedAt));
++		}
 +		return 0;
 +	} catch (error) {
 +		if (Module.printErr) {
-+			Module.printErr("KRKR2WEB_E_DECOMPRESSION_FAILED " +
++			Module.printErr("KRKR2WEB_E_DECOMPRESSION_WORKER " +
 +				(error && error.message ? error.message : String(error)));
 +		}
 +		return -3;
++	} finally {
++		if (timer) clearTimeout(timer);
++		if (worker) worker.terminate();
++		if (globalThis.krkr2webAsyncTrace === trace) globalThis.krkr2webAsyncTrace = null;
 +	}
 +});
 +
@@ -50,7 +103,7 @@ index ea98c1b..3355ca0 100644
  bool TVPAllowExtractProtectedStorage = true;
  
  
-@@ -401,6 +442,6 @@ tTVPXP3Archive::tTVPXP3Archive(const ttstr & name) : tTVPArchive(name)
+@@ -401,6 +495,6 @@ tTVPXP3Archive::tTVPXP3Archive(const ttstr & name) : tTVPArchive(name)
  						TJS_W(" last=") + ttstr((tjs_int)compressed[compressed_size - 1]));
  #endif
 -					int result = uncompress(  /* uncompress from zlib */
@@ -58,7 +111,7 @@ index ea98c1b..3355ca0 100644
  						(unsigned char *)indexdata,
  						&destlen, (unsigned char*)compressed,
  							(unsigned long)compressed_size);
-@@ -704,7 +745,7 @@ public:
+@@ -704,7 +798,7 @@ public:
  
  			Data = new tjs_uint8 [outsize];
  			unsigned long destlen = outsize;

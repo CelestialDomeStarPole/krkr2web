@@ -17,6 +17,7 @@
     <nav class="tabs" aria-label="主要页面">
       <button class="tab active" type="button" data-view="library">游戏库</button>
       <button class="tab" type="button" data-view="downloads">下载</button>
+      <button class="tab" type="button" data-view="saves">存档</button>
       <button class="tab" type="button" data-view="settings">设置</button>
     </nav>
     <div class="storage-summary" aria-label="站点存储">
@@ -49,6 +50,31 @@
       </div>
     </section>
 
+    <section id="saves-view" class="view" data-view-panel="saves" hidden>
+      <div class="single-column save-column">
+        <div class="section-heading save-heading">
+          <div><p>SAVE DATA</p><h1>存档管理</h1></div>
+          <div class="save-heading-copy">
+            <strong id="save-game-title">未选择游戏</strong>
+            <span id="save-summary">0 个文件</span>
+          </div>
+        </div>
+        <div class="save-toolbar">
+          <span id="save-manager-status">正在读取</span>
+          <div class="save-actions">
+            <button id="refresh-saves" class="icon-button" type="button" title="刷新存档" aria-label="刷新存档">↻</button>
+            <button id="import-saves" class="secondary" type="button" title="从服务器导入通关存档（会先停止正在运行的游戏并覆盖同名文件）">导入通关存档</button>
+            <button id="delete-selected-saves" class="secondary" type="button" disabled>删除选中</button>
+            <button id="delete-all-saves" class="danger-inline" type="button" disabled>删除全部</button>
+          </div>
+        </div>
+        <div class="save-table-heading" aria-hidden="true">
+          <span>选择</span><span>类型</span><span>文件与时间</span><span>大小</span>
+        </div>
+        <div id="save-list" class="save-list" aria-live="polite"></div>
+      </div>
+    </section>
+
     <section id="settings-view" class="view" data-view-panel="settings" hidden>
       <div class="single-column settings-column">
         <div class="section-heading"><div><p>DEVICE</p><h1>设备与离线</h1></div></div>
@@ -72,6 +98,8 @@
       <button id="player-back-button" class="icon-button" type="button" title="返回游戏库" aria-label="返回游戏库">←</button>
       <strong id="game-title">正在启动</strong>
       <span id="save-status">读取存档</span>
+      <button id="player-restart-button" class="icon-button" type="button" title="强制重启游戏" aria-label="强制重启游戏">↻</button>
+      <button id="player-stop-button" class="icon-button stop-button" type="button" title="强制终止游戏" aria-label="强制终止游戏">■</button>
     </header>
     <div class="player-stage">
       <canvas id="canvas" tabindex="-1"></canvas>
@@ -87,8 +115,10 @@
   <script src="/downloader.js"></script>
   <script src="/play/storage.js"></script>
   <script src="/engine-profiles.js"></script>
+  <script src="/engine-worker-host.js"></script>
   <script src="/engine/krkrsdl2.js"></script>
   <script src="/player.js"></script>
+  <script src="/save-manager.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

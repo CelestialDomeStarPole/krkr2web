@@ -1,0 +1,44 @@
+diff --git a/external/krkrz/visual/TransIntf.cpp b/external/krkrz/visual/TransIntf.cpp
+--- a/external/krkrz/visual/TransIntf.cpp
++++ b/external/krkrz/visual/TransIntf.cpp
+@@ -349,6 +349,18 @@ iTVPTransHandlerProvider * TVPFindTransHandlerProvider(const ttstr &name)
+ 
+ 	tTVPTransHandlerProviderHolder *holder =
+ 		TVPTransHandlerProviders.Find(name);
++#ifdef __EMSCRIPTEN__
++	// extrans depends on the unavailable RenderManager backend. Keep its known
++	// transition contracts usable by falling back to the built-in crossfade.
++	if(!holder && (name == TJS_W("wave") || name == TJS_W("mosaic") ||
++		name == TJS_W("turn") || name == TJS_W("rotatezoom") ||
++		name == TJS_W("rotatevanish") || name == TJS_W("rotateswap") ||
++		name == TJS_W("ripple")))
++	{
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_TRANS_FALLBACK ")) + name);
++		holder = TVPTransHandlerProviders.Find(TJS_W("crossfade"));
++	}
++#endif
+ 	if(!holder)
+ 		TVPThrowExceptionMessage(TVPCannotFindTransHander, name);
+ 
+diff --git a/src/plugins/kremscripten.cpp b/src/plugins/kremscripten.cpp
+--- a/src/plugins/kremscripten.cpp
++++ b/src/plugins/kremscripten.cpp
+@@ -633,6 +633,11 @@ emscripten::val evalTJSFromJS(tjs_string v)
+ 	return emscripten::val::undefined();
+ }
+ 
++void forceTerminateFromJS()
++{
++	emscripten_cancel_main_loop();
++}
++
+ emscripten::val getLayerBitmapUInt8Array(emscripten::val v, bool for_write)
+ {
+ 	emscripten::val r = emscripten::val::undefined();
+@@ -1029,6 +1034,7 @@ EMSCRIPTEN_BINDINGS(KirikiriEmscriptenInterface)
+ {
+ 	emscripten::function("evalTJS", &evalTJSFromJS);
++	emscripten::function("forceTerminate", &forceTerminateFromJS);
+ 	emscripten::function("getLayerBitmapUInt8Array", &getLayerBitmapUInt8Array);
+ 	emscripten::function("getStorageUInt8Array", &getStorageUInt8Array);
+ 	emscripten::function("getStorageString", &getStorageString);

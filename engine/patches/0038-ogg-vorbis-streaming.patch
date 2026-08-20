@@ -1,0 +1,40 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -163,6 +163,7 @@
+ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
+ list(APPEND KRKRSDL2COMMON_SRC src/plugins/kremscripten.cpp)
++list(APPEND KRKRSDL2COMMON_SRC external/krkrz/sound/OggVorbisDecoder.cpp)
+ endif()
+ 
+@@ -194,2 +195,3 @@
+ 	-sUSE_SDL=2
++	-sUSE_VORBIS=1
+ 	-lidbfs.js
+@@ -201,4 +203,5 @@
+ list(APPEND KRKRSDL2_CFLAGS
+ 	-sDISABLE_EXCEPTION_CATCHING=0
+ 	-sUSE_SDL=2
++	-sUSE_VORBIS=1
+ 	-fPIC
+diff --git a/external/krkrz/sound/WaveIntf.cpp b/external/krkrz/sound/WaveIntf.cpp
+--- a/external/krkrz/sound/WaveIntf.cpp
++++ b/external/krkrz/sound/WaveIntf.cpp
+@@ -795,6 +795,9 @@
+ #ifdef TVP_OPUS_DECODER_IMPLEMENT
+ extern void TVPRegisterOpusDecoderCreator();
+ #endif
++#ifdef __EMSCRIPTEN__
++extern void TVPRegisterVorbisDecoderCreator();
++#endif
+ //---------------------------------------------------------------------------
+ // tTVPWaveDecoder interface management
+@@ -811,6 +814,9 @@
+ #ifdef TVP_OPUS_DECODER_IMPLEMENT
+ 		TVPRegisterOpusDecoderCreator();
+ #endif
++#ifdef __EMSCRIPTEN__
++		TVPRegisterVorbisDecoderCreator();
++#endif
+ 	}
+ 

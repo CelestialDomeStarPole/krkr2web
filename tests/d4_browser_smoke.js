@@ -1,7 +1,7 @@
 "use strict";
 
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium } = require("playwright-core");
 
 function assertLayout(layout) {
   if (layout.scrollWidth > layout.width + 1 || layout.scrollHeight > layout.height + 1) {
@@ -67,9 +67,11 @@ async function main() {
   const page = await context.newPage();
   const consoleLines = [];
   const requests = [];
+  const dialogs = [];
   page.on("console", function (message) { consoleLines.push(message.type() + ": " + message.text()); });
   page.on("pageerror", function (error) { consoleLines.push("pageerror: " + error.stack); });
   page.on("request", function (request) { requests.push({ url: request.url(), at: Date.now() }); });
+  page.on("dialog", async function (dialog) { dialogs.push(dialog.message()); await dialog.accept(); });
   try {
     var response = await page.goto(baseUrl + "/library/deep/page.html?source=smoke", { waitUntil: "networkidle", timeout: 30000 });
     if (!response || response.status() !== 200 || new URL(page.url()).pathname !== "/") {
@@ -121,14 +123,87 @@ async function main() {
       throw new Error("D4 player did not start offline in the current document: " + JSON.stringify({ stableUrl, currentUrl: page.url(), offlinePlayer, launchRequests }));
     }
 
+    await page.evaluate(function () {
+      window.Module.FS.writeFile("/savedata/d3-test/shell-save-test.sav", new Uint8Array([75, 82, 75, 82, 50]));
+      return window.krkr2Player.syncSaves();
+    });
+
     await page.getByRole("button", { name: "返回游戏库" }).click();
     var offlineLibrary = await libraryState(page);
     assertLayout(offlineLibrary.layout);
     if (page.url() !== stableUrl || !offlineLibrary.app.installs["d3-test"].complete || offlineLibrary.app.samePageOffline.visible) {
       throw new Error("D4 current-document return did not preserve the library: " + JSON.stringify(offlineLibrary));
     }
+
+    await page.getByRole("button", { name: "存档", exact: true }).click();
+    await page.waitForFunction(function () {
+      return window.krkr2SaveManager.snapshot().entries.length > 0;
+    }, null, { timeout: 10000 });
+    var saveManager = await page.evaluate(function () {
+      return {
+        state: window.krkr2SaveManager.snapshot(),
+        rows: document.querySelectorAll(".save-row").length,
+        visible: !document.getElementById("saves-view").hidden
+      };
+    });
+    if (!saveManager.visible || saveManager.rows < 1 || saveManager.state.entries[0].bytes <= 0) {
+      throw new Error("D4 save manager did not expose the IDBFS save: " + JSON.stringify(saveManager));
+    }
+
+    await page.getByRole("button", { name: "游戏库", exact: true }).click();
+    var restartStartedAt = Date.now();
+    var firstGeneration = offlinePlayer.state.generation;
+    await page.getByRole("button", { name: "强制重启", exact: true }).click();
+    await page.waitForFunction(function (generation) {
+      var state = window.d4PlayerState();
+      return state.ready && state.visible && state.generation > generation;
+    }, firstGeneration, { timeout: 60000 });
+    var restartedPlayer = await playerState(page);
+    var restartRequests = requests.filter(function (entry) { return entry.at >= restartStartedAt; });
+    if (page.url() !== stableUrl || restartedPlayer.state.crashed || restartedPlayer.state.generation <= firstGeneration || restartRequests.length !== 0) {
+      throw new Error("D4 same-document forced restart failed: " + JSON.stringify({ restartedPlayer, restartRequests }));
+    }
+
+    var crashRestartStartedAt = Date.now();
+    var restartedGeneration = restartedPlayer.state.generation;
+    await page.evaluate(function () { window.alert("fatal error: browser smoke"); });
+    await page.waitForFunction(function () { return window.d4PlayerState().crashed; });
+    await page.getByRole("button", { name: "返回游戏库" }).click();
+    await page.getByRole("button", { name: "重新启动游戏", exact: true }).click();
+    await page.waitForFunction(function (generation) {
+      var state = window.d4PlayerState();
+      return state.ready && state.visible && !state.crashed && state.generation > generation;
+    }, restartedGeneration, { timeout: 60000 });
+    var crashRestartedPlayer = await playerState(page);
+    var crashRestartRequests = requests.filter(function (entry) { return entry.at >= crashRestartStartedAt; });
+    if (page.url() !== stableUrl || crashRestartRequests.length !== 0) {
+      throw new Error("D4 fatal-alert recovery failed: " + JSON.stringify({ crashRestartedPlayer, crashRestartRequests }));
+    }
+
+    var forceStopStartedAt = Date.now();
+    await page.getByRole("button", { name: "强制终止游戏", exact: true }).click();
+    await page.waitForFunction(function () {
+      var state = window.d4PlayerState();
+      return !state.running && !state.visible && state.forcedStopCount > 0;
+    }, null, { timeout: 10000 });
+    var forceStoppedPlayer = await playerState(page);
+    var forceStopRequests = requests.filter(function (entry) { return entry.at >= forceStopStartedAt; });
+    if (page.url() !== stableUrl || forceStopRequests.length !== 0) {
+      throw new Error("D4 immediate force stop failed: " + JSON.stringify({ forceStoppedPlayer, forceStopRequests }));
+    }
+
+    await page.getByRole("button", { name: "存档", exact: true }).click();
+    await page.waitForFunction(function () { return window.krkr2SaveManager.snapshot().entries.length > 0; });
     await page.screenshot({ path: output, fullPage: true });
-    process.stdout.write(JSON.stringify({ before, installed, stableUrl, offlinePlayer, launchRequests, offlineLibrary, consoleLines }, null, 2) + "\n");
+    await page.locator(".save-row input[type=checkbox]").check();
+    await page.getByRole("button", { name: "删除选中", exact: true }).click();
+    await page.getByRole("button", { name: "再次点击确认删除", exact: true }).click();
+    await page.waitForFunction(function () {
+      var state = window.krkr2SaveManager.snapshot();
+      return !state.busy && state.entries.length === 0;
+    }, null, { timeout: 20000 });
+    var afterDelete = await page.evaluate(function () { return window.krkr2SaveManager.snapshot(); });
+    process.stdout.write(JSON.stringify({ before, installed, stableUrl, offlinePlayer, launchRequests, offlineLibrary, saveManager, restartedPlayer, restartRequests, crashRestartedPlayer, crashRestartRequests, forceStoppedPlayer, forceStopRequests, dialogs, afterDelete, consoleLines }, null, 2) + "\n");
   } finally {
     await context.setOffline(false).catch(function () {});
     await browser.close();

@@ -3,7 +3,11 @@
 
   var DATABASE_NAME = "krkr2web";
   var DATABASE_VERSION = 1;
-  var CACHE_LIMIT = 4;
+  var DEFAULT_CACHE_BYTES = 64 * 1024 * 1024;
+  var deviceMemory = Number(navigator.deviceMemory || 0);
+  var CACHE_LIMIT_BYTES = deviceMemory > 0 && deviceMemory <= 2
+    ? 32 * 1024 * 1024
+    : (deviceMemory >= 8 ? 128 * 1024 * 1024 : DEFAULT_CACHE_BYTES);
   var MAX_READ_BYTES = 64 * 1024 * 1024;
   var ERROR_STORAGE = -5;
   var ERROR_CHUNK_MISSING = -4;
@@ -20,10 +24,52 @@
 
   function requestResult(request) {
     return new Promise(function (resolve, reject) {
+      var transaction = request.transaction;
       request.onsuccess = function () { resolve(request.result); };
       request.onerror = function () { reject(request.error || new Error("IndexedDB request failed")); };
+      if (transaction) {
+        // an aborted transaction never fires request onerror/on success in
+        // some Chrome builds; without this the promise hangs forever and the
+        // engine's Asyncify suspension never resumes (observed as the
+        // idle freeze on device)
+        transaction.onabort = function () { reject(transaction.error || new Error("IndexedDB transaction aborted")); };
+      }
     });
   }
+  function withTimeout(promise, ms, label) {
+    return new Promise(function (resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function () {
+        if (settled) { return; }
+        settled = true;
+        reject(new Error(label + " timed out after " + ms + "ms"));
+      }, ms);
+      promise.then(function (value) {
+        if (settled) { return; }
+        settled = true; clearTimeout(timer); resolve(value);
+      }, function (error) {
+        if (settled) { return; }
+        settled = true; clearTimeout(timer); reject(error);
+      });
+    });
+  }
+  // single persistent connection: reopening IndexedDB per chunk read caused
+  // rapid open/close cycles that can hang the open request in WebView
+  var sharedDatabase = null;
+  async function getDatabase() {
+    if (sharedDatabase) { return sharedDatabase; }
+    sharedDatabase = await withTimeout(openDatabase(), 20000, "IndexedDB open");
+    sharedDatabase.onversionchange = function () {
+      sharedDatabase.close(); sharedDatabase = null;
+    };
+    return sharedDatabase;
+  }
+  var pendingTrace = null;
+  function traceStart(op, detail) {
+    pendingTrace = { op: op, detail: detail || "", startedAt: Date.now() };
+    if (window.krkr2webStorageTrace !== undefined) { window.krkr2webStorageTrace = pendingTrace; }
+  }
+  function traceEnd() { pendingTrace = null; window.krkr2webStorageTrace = null; }
 
   function openDatabase() {
     return new Promise(function (resolve, reject) {
@@ -71,7 +117,7 @@
     }
     cache.set(key, buffer);
     cacheBytes += buffer.byteLength;
-    while (cache.size > CACHE_LIMIT) {
+    while (cacheBytes > CACHE_LIMIT_BYTES && cache.size > 1) {
       var oldest = cache.keys().next().value;
       cacheBytes -= cache.get(oldest).byteLength;
       cache.delete(oldest);
@@ -79,28 +125,44 @@
     metrics.maximumCacheBytes = Math.max(metrics.maximumCacheBytes, cacheBytes);
   }
 
-  async function loadChunk(pkg, chunkIndex) {
-    var key = cacheKey(pkg, chunkIndex);
-    if (cache.has(key)) {
-      var cached = cache.get(key);
-      cache.delete(key);
-      cache.set(key, cached);
-      metrics.cacheHits += 1;
-      return cached;
+  async function loadChunkRange(pkg, firstChunk, lastChunk) {
+    var result = [];
+    var missing = [];
+    for (var chunkIndex = firstChunk; chunkIndex <= lastChunk; chunkIndex += 1) {
+      var key = cacheKey(pkg, chunkIndex);
+      if (cache.has(key)) {
+        var cached = cache.get(key);
+        cache.delete(key);
+        cache.set(key, cached);
+        metrics.cacheHits += 1;
+        result[chunkIndex - firstChunk] = cached;
+      } else {
+        metrics.cacheMisses += 1;
+        missing.push(chunkIndex);
+      }
     }
-    metrics.cacheMisses += 1;
-    var database = await openDatabase();
+    if (missing.length === 0) { return result; }
+
+    traceStart("loadChunkRange", pkg.id + ":" + firstChunk + "-" + lastChunk);
+    var database = await getDatabase();
     try {
       var transaction = database.transaction("chunks", "readonly");
-      var chunk = await requestResult(transaction.objectStore("chunks").get([
-        state.gameId, state.version, pkg.id, chunkIndex
-      ]));
-      if (!(chunk instanceof ArrayBuffer)) { return null; }
-      metrics.indexedDbBytes += chunk.byteLength;
-      putCache(key, chunk);
-      return chunk;
+      var store = transaction.objectStore("chunks");
+      var requests = missing.map(function (index) {
+        return requestResult(store.get([state.gameId, state.version, pkg.id, index]));
+      });
+      var chunks = await withTimeout(Promise.all(requests), 20000,
+        "IndexedDB chunk range " + pkg.id + ":" + firstChunk + "-" + lastChunk);
+      chunks.forEach(function (chunk, index) {
+        var actualIndex = missing[index];
+        if (!(chunk instanceof ArrayBuffer)) { return; }
+        metrics.indexedDbBytes += chunk.byteLength;
+        putCache(cacheKey(pkg, actualIndex), chunk);
+        result[actualIndex - firstChunk] = chunk;
+      });
+      return result;
     } finally {
-      database.close();
+      traceEnd();
     }
   }
 
@@ -115,7 +177,7 @@
   }
 
   async function prepare(gameId) {
-    var database = await openDatabase();
+    var database = await getDatabase();
     try {
       if (!database.objectStoreNames.contains("installs") ||
           !database.objectStoreNames.contains("manifests") ||
@@ -135,8 +197,9 @@
       }
       state = { gameId: gameId, version: install.activeVersion, install: install, manifest: manifest };
       return state;
-    } finally {
-      database.close();
+    } catch (error) {
+      sharedDatabase.close(); sharedDatabase = null;
+      throw error;
     }
   }
 
@@ -165,10 +228,16 @@
     var currentOffset = offset;
     var writeOffset = destination;
     try {
+      if (remaining === 0) { return 0; }
+      var firstChunk = Math.floor(currentOffset / pkg.chunkSize);
+      var lastChunk = Math.floor((currentOffset + remaining - 1) / pkg.chunkSize);
+      // Fetch one logical engine read in one IndexedDB transaction. Large XP3
+      // entries otherwise pay a transaction round-trip for every 4 MiB chunk.
+      var chunks = await loadChunkRange(pkg, firstChunk, lastChunk);
       while (remaining > 0) {
         var chunkIndex = Math.floor(currentOffset / pkg.chunkSize);
         var inChunk = currentOffset - chunkIndex * pkg.chunkSize;
-        var chunk = await loadChunk(pkg, chunkIndex);
+        var chunk = chunks[chunkIndex - firstChunk];
         if (!chunk) { return ERROR_CHUNK_MISSING; }
         var available = Math.min(remaining, chunk.byteLength - inChunk);
         if (available <= 0) { return ERROR_STORAGE; }
@@ -189,6 +258,11 @@
     if (handles[handle]) { delete handles[handle]; metrics.closeCalls += 1; }
   }
 
+  function releaseAll() {
+    handles = {};
+    if (sharedDatabase) { try { sharedDatabase.close(); } catch (error) {} sharedDatabase = null; }
+  }
+
   function snapshot() {
     return {
       gameId: state && state.gameId, version: state && state.version,
@@ -196,12 +270,13 @@
         return { id: pkg.id, virtualPath: pkg.virtualPath, size: pkg.size };
       }) : [],
       cacheBytes: cacheBytes, cacheEntries: cache.size,
+      cacheLimitBytes: CACHE_LIMIT_BYTES,
       metrics: JSON.parse(JSON.stringify(metrics))
     };
   }
 
   window.krkr2StorageBridge = {
     prepare: prepare, open: open, exists: exists, size: size,
-    readToHeap: readToHeap, close: close, snapshot: snapshot
+    readToHeap: readToHeap, close: close, releaseAll: releaseAll, snapshot: snapshot
   };
 }());

@@ -1,0 +1,160 @@
+diff --git a/src/core/base/sdl2/StorageImpl.cpp b/src/core/base/sdl2/StorageImpl.cpp
+--- a/src/core/base/sdl2/StorageImpl.cpp
++++ b/src/core/base/sdl2/StorageImpl.cpp
+@@ -31,6 +31,60 @@
+ #ifdef __EMSCRIPTEN__
+ #include <emscripten.h>
+ 
++#if defined(__EMSCRIPTEN_PTHREADS__)
++#include <emscripten/threading.h>
++#include <cstdint>
++
++static int krkr2web_open_cached_package(const char *path)
++{
++	return MAIN_THREAD_EM_ASM_INT({
++		return Module.krkr2Storage ? Module.krkr2Storage.open(UTF8ToString($0)) : 0;
++	}, path);
++}
++
++static int krkr2web_cached_package_exists(const char *path)
++{
++	return MAIN_THREAD_EM_ASM_INT({
++		return Module.krkr2Storage && Module.krkr2Storage.exists(UTF8ToString($0)) ? 1 : 0;
++	}, path);
++}
++
++static double krkr2web_cached_package_size(int handle)
++{
++	return MAIN_THREAD_EM_ASM_DOUBLE({
++		return Module.krkr2Storage ? Module.krkr2Storage.size($0) : -1;
++	}, handle);
++}
++
++static int krkr2web_read_cached_package(int handle, double offset, int length,
++	unsigned char *destination)
++{
++	static const int pending = INT32_MIN;
++	volatile int result = pending;
++	MAIN_THREAD_ASYNC_EM_ASM({
++		var resultAddress = $4;
++		var read = Module.krkr2Storage
++			? Module.krkr2Storage.readToHeap($0, $1, $2, $3, HEAPU8)
++			: Promise.resolve(-5);
++		Promise.resolve(read).then(function(value) {
++			Atomics.store(HEAP32, resultAddress >> 2, value | 0);
++			Atomics.notify(HEAP32, resultAddress >> 2, 1);
++		}, function() {
++			Atomics.store(HEAP32, resultAddress >> 2, -5);
++			Atomics.notify(HEAP32, resultAddress >> 2, 1);
++		});
++	}, handle, offset, length, destination, &result);
++	emscripten_futex_wait(&result, static_cast<uint32_t>(pending), 30000.0);
++	return result == pending ? -5 : result;
++}
++
++static void krkr2web_close_cached_package(int handle)
++{
++	MAIN_THREAD_EM_ASM({
++		if (Module.krkr2Storage) Module.krkr2Storage.close($0);
++	}, handle);
++}
++#else
+ EM_JS(int, krkr2web_open_cached_package, (const char *path), {
+ 	return Module.krkr2Storage ? Module.krkr2Storage.open(UTF8ToString(path)) : 0;
+ });
+@@ -48,6 +102,7 @@ EM_ASYNC_JS(int, krkr2web_read_cached_package,
+ EM_JS(void, krkr2web_close_cached_package, (int handle), {
+ 	if (Module.krkr2Storage) Module.krkr2Storage.close(handle);
+ });
++#endif
+ #endif
+ 
+ #ifndef _WIN32
+diff --git a/src/core/environ/sdl2/Application.cpp b/src/core/environ/sdl2/Application.cpp
+--- a/src/core/environ/sdl2/Application.cpp
++++ b/src/core/environ/sdl2/Application.cpp
+@@ -54,12 +54,24 @@
+ #ifdef __EMSCRIPTEN__
+ #include <emscripten.h>
+ 
++#if defined(__EMSCRIPTEN_PTHREADS__)
++static void krkr2web_sync_savedata()
++{
++	MAIN_THREAD_ASYNC_EM_ASM({
++		FS.syncfs(false, function(error) {
++			if (error && Module.printErr) Module.printErr("IDBFS save sync failed: " + error);
++			Module._emscripten_syncfs_is_finished();
++		});
++	});
++}
++#else
+ EM_JS(void, krkr2web_sync_savedata, (), {
+ 	FS.syncfs(false, function(error) {
+ 		if (error && Module.printErr) Module.printErr("IDBFS save sync failed: " + error);
+ 		_emscripten_syncfs_is_finished();
+ 	});
+ });
++#endif
+ #endif
+ #ifndef _WIN32
+ #include "VirtualKey.h"
+diff --git a/src/core/visual/sdl2/VideoOvlImpl.cpp b/src/core/visual/sdl2/VideoOvlImpl.cpp
+--- a/src/core/visual/sdl2/VideoOvlImpl.cpp
++++ b/src/core/visual/sdl2/VideoOvlImpl.cpp
+@@ -69,18 +69,37 @@
+ // webm; all hooks are synchronous no-ops when the page does not define
+ // them, preserving the previous skip-video behavior.
+-EM_JS(void, krkr2webVideoOpen, (const char *name), {
+-	if (globalThis.krkr2webVideoOpen) globalThis.krkr2webVideoOpen(UTF8ToString(name));
+-});
+-EM_JS(void, krkr2webVideoPlay, (), {
+-	if (globalThis.krkr2webVideoPlay) globalThis.krkr2webVideoPlay();
+-});
+-EM_JS(void, krkr2webVideoStop, (), {
+-	if (globalThis.krkr2webVideoStop) globalThis.krkr2webVideoStop();
+-});
+-EM_JS(void, krkr2webVideoPause, (int pause), {
+-	if (globalThis.krkr2webVideoPause) globalThis.krkr2webVideoPause(pause);
+-});
++static void krkr2webVideoOpen(const char *name)
++{
++	MAIN_THREAD_EM_ASM({
++		if (globalThis.krkr2webVideoOpen)
++			globalThis.krkr2webVideoOpen(UTF8ToString($0));
++	}, name);
++}
++
++static void krkr2webVideoPlay()
++{
++	MAIN_THREAD_EM_ASM({
++		if (globalThis.krkr2webVideoPlay) globalThis.krkr2webVideoPlay();
++	});
++}
++
++static void krkr2webVideoStop()
++{
++	MAIN_THREAD_EM_ASM({
++		if (globalThis.krkr2webVideoStop) globalThis.krkr2webVideoStop();
++	});
++}
++
++static void krkr2webVideoPause(int pause)
++{
++	MAIN_THREAD_EM_ASM({
++		if (globalThis.krkr2webVideoPause) globalThis.krkr2webVideoPause($0);
++	}, pause);
++}
+ 
+ tTJSNI_VideoOverlay *tTJSNI_VideoOverlay::WebVideoActiveOverlay = nullptr;
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -3029,7 +3029,7 @@ bool SDLApplication::Run()
+ 		static tjs_int heartbeat_counter = 0;
+ 		if((heartbeat_counter++ & 3) == 0)
+ 		{
+-			EM_ASM(
++			MAIN_THREAD_ASYNC_EM_ASM(
+ 				if (globalThis.krkr2webEngineHeartbeat)
+ 					globalThis.krkr2webEngineHeartbeat();
+ 			);

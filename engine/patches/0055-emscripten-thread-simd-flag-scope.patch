@@ -1,0 +1,18 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -373,15 +373,11 @@
+ if(KRKRSDL2_EMSCRIPTEN_ENABLE_WASM_SIMD)
+ list(APPEND KRKRSDL2_CFLAGS
+ 	-msimd128
+-	-msse4.2
+ )
+ endif()
+ if(KRKRSDL2_EMSCRIPTEN_ENABLE_THREADS)
+ list(APPEND KRKRSDL2_CFLAGS
+-	-sUSE_PTHREADS=1
+-	-sPROXY_TO_PTHREAD=1
+-	-sOFFSCREEN_FRAMEBUFFER=1
++	-pthread
+ )
+ endif()

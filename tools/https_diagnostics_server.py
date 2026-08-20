@@ -8,6 +8,7 @@ import datetime as dt
 import functools
 import http.server
 import json
+import mimetypes
 import os
 import re
 import ssl
@@ -38,11 +39,27 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         *args: object,
         report_directory: str,
         resource_map: dict[str, dict[str, object]] | None = None,
+        video_directory: str | None = None,
+        savedata_directory: str | None = None,
         **kwargs: object,
     ) -> None:
         self.report_directory = Path(report_directory)
         self.resource_map = resource_map or {}
+        self.video_directory = Path(video_directory).resolve() if video_directory else None
+        self.savedata_directory = Path(savedata_directory).resolve() if savedata_directory else None
         super().__init__(*args, **kwargs)
+
+    def translate_path(self, path: str) -> str:
+        request = urlsplit(path).path
+        if self.video_directory and request.startswith("/videos/"):
+            # krkr2web: pre-transcoded game videos served read-only from a
+            # separate directory so the transcoded video cache never enters the
+            # product build.
+            relative = request[len("/videos/"):].lstrip("/")
+            target = (self.video_directory / relative).resolve()
+            if target.is_relative_to(self.video_directory):
+                return str(target)
+        return super().translate_path(path)
 
     def end_headers(self) -> None:
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
@@ -156,15 +173,112 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _serve_video(self, head_only: bool) -> bool:
+        # krkr2web: SimpleHTTPRequestHandler ignores Range headers, which the
+        # <video> overlay needs for seeking. Serve /videos/ files ourselves.
+        request_path = urlsplit(self.path).path
+        if not (self.video_directory and request_path.startswith("/videos/")):
+            return False
+        target = Path(self.translate_path(request_path))
+        if not target.is_file():
+            return False
+        size = target.stat().st_size
+        start, end = 0, size - 1
+        status = http.HTTPStatus.OK
+        requested_range = self.headers.get("Range")
+        if requested_range:
+            match = RANGE_PATTERN.fullmatch(requested_range.strip())
+            if match:
+                start = int(match.group(1))
+                requested_end = match.group(2)
+                end = int(requested_end) if requested_end else size - 1
+            if not match or start >= size or end < start:
+                self.send_response(http.HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return True
+            end = min(end, size - 1)
+            status = http.HTTPStatus.PARTIAL_CONTENT
+        content_length = max(0, end - start + 1)
+        self.send_response(status)
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_header("Content-Type", content_type)
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(content_length))
+        if status == http.HTTPStatus.PARTIAL_CONTENT:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.end_headers()
+        if head_only or content_length == 0:
+            return True
+        try:
+            with target.open("rb") as stream:
+                stream.seek(start)
+                remaining = content_length
+                while remaining:
+                    block = stream.read(min(COPY_BUFFER_BYTES, remaining))
+                    if not block:
+                        break
+                    self.wfile.write(block)
+                    remaining -= len(block)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        return True
+
+    def _serve_savedata_import(self, head_only: bool) -> bool:
+        # krkr2web: read-only cleared-save import directory. The browser save
+        # manager fetches manifest.json plus each file and writes IDBFS-shaped
+        # records into the game's save database.
+        request_path = urlsplit(self.path).path
+        if not (self.savedata_directory and request_path.startswith("/savedata-import/")):
+            return False
+        relative = request_path[len("/savedata-import/"):].lstrip("/")
+        if relative == "manifest.json":
+            files = []
+            if self.savedata_directory.is_dir():
+                for entry in sorted(self.savedata_directory.iterdir()):
+                    if entry.is_file():
+                        files.append({"name": entry.name, "bytes": entry.stat().st_size})
+            payload = json.dumps({"files": files}, ensure_ascii=False).encode("utf-8")
+            self.send_response(http.HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(payload)
+            return True
+        target = (self.savedata_directory / relative).resolve()
+        if not (relative and target.is_relative_to(self.savedata_directory) and target.is_file()):
+            self.send_error(http.HTTPStatus.NOT_FOUND)
+            return True
+        payload = target.read_bytes()
+        self.send_response(http.HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(payload)
+        return True
+
     def do_GET(self) -> None:
         if self._resource_entry() is not None:
             self._serve_resource(head_only=False)
+            return
+        if self._serve_video(head_only=False):
+            return
+        if self._serve_savedata_import(head_only=False):
             return
         self._serve_or_redirect("do_GET")
 
     def do_HEAD(self) -> None:
         if self._resource_entry() is not None:
             self._serve_resource(head_only=True)
+            return
+        if self._serve_video(head_only=True):
+            return
+        if self._serve_savedata_import(head_only=True):
             return
         self._serve_or_redirect("do_HEAD")
 
@@ -291,6 +405,16 @@ def main() -> None:
         type=Path,
         help="optional JSON map for exact URL paths backed by large local files",
     )
+    parser.add_argument(
+        "--video-directory",
+        type=Path,
+        help="optional directory served under /videos/ (pre-transcoded game videos)",
+    )
+    parser.add_argument(
+        "--savedata-directory",
+        type=Path,
+        help="optional directory served under /savedata-import/ (cleared saves for browser import)",
+    )
     parser.add_argument("--http", action="store_true", help="local automated QA only; do not use for device testing")
     args = parser.parse_args()
 
@@ -329,6 +453,8 @@ def main() -> None:
         directory=str(directory),
         report_directory=str(report_directory),
         resource_map=resource_map,
+        video_directory=str(args.video_directory.resolve()) if args.video_directory else None,
+        savedata_directory=str(args.savedata_directory.resolve()) if args.savedata_directory else None,
     )
     server = http.server.ThreadingHTTPServer((args.bind, args.port), handler)
     scheme = "http" if args.http else "https"

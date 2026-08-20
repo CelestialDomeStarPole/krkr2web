@@ -1,0 +1,135 @@
+diff --git a/src/core/sound/sdl2/WaveImpl.cpp b/src/core/sound/sdl2/WaveImpl.cpp
+--- a/src/core/sound/sdl2/WaveImpl.cpp
++++ b/src/core/sound/sdl2/WaveImpl.cpp
+@@ -2983,8 +2983,9 @@ void tTJSNI_WaveSoundBuffer::ResetLastCheckedDecodePos(DWORD pp)
+ 	int offset, rblock;
+ 	{
+-		rblock = SoundBufferWritePos;
+-		offset = 0;
++		tjs_uint playSamples = SoundBuffer->GetCurrentPlaySamples();
++		rblock = (playSamples / AccessUnitSamples) % L1BufferUnits;
++		offset = playSamples % AccessUnitSamples;
+ 	}
+ 	if (L1BufferDecodeSamplePos[rblock] != -1)
+ 	{
+@@ -3290,8 +3291,9 @@ tjs_uint64 tTJSNI_WaveSoundBuffer::GetSamplePosition()
+ 	int offset, rblock;
+ 	{
+-		rblock = SoundBufferWritePos;
+-		offset = 0;
++		tjs_uint playSamples = SoundBuffer->GetCurrentPlaySamples();
++		rblock = (playSamples / AccessUnitSamples) % L1BufferUnits;
++		offset = playSamples % AccessUnitSamples;
+ 	}
+ #if 0
+ 	tjs_int rblock = pp / AccessUnitBytes;
+diff --git a/src/core/sound/sdl2/OpenALWaveMixer.cpp b/src/core/sound/sdl2/OpenALWaveMixer.cpp
+--- a/src/core/sound/sdl2/OpenALWaveMixer.cpp
++++ b/src/core/sound/sdl2/OpenALWaveMixer.cpp
+@@ -53,7 +53,7 @@ public:
+ 		_frame_size = desired.BytesPerSample * desired.Channels;
+ 		_bufferIds = new ALuint[bufcount];
+ 		_bufferIds2 = new ALuint[bufcount];
+-		_bufferSize = new tjs_uint[bufcount];
++		_bufferSize = new tjs_uint[bufcount]();
+ 		_format = desired;
+ 		_volume = 1.0f;
+ 		_sourcePos[0] = 0.0f;
+@@ -197,6 +197,7 @@ public:
+ 			_bufferIdx = 0;
+ 		}
+ 		ALuint bufid = _bufferIds[_bufferIdx];
++		_bufferSize[_bufferIdx] = len;
+ 		alBufferData(bufid, _alFormat, buf, len, _format.SamplesPerSec);
+ 		CheckALError("alBufferData");
+ 		alSourceQueueBuffers(_alSource, 1, &bufid);
+@@ -325,16 +325,16 @@ public:
+ 	tjs_uint GetLatencySamples() override
+ 	{
+ 		tTJSCriticalSectionHolder holder(_buffer_mtx);
+ 		ALint offset = 0;
+ 		ALint queued = 0;
+-		alGetSourcei(_alSource, AL_BYTE_OFFSET, &offset);
++		alGetSourcei(_alSource, AL_SAMPLE_OFFSET, &offset);
+ 		alGetSourcei(_alSource, AL_BUFFERS_QUEUED, &queued);
+ 		int remainBuffers = queued;
+ 		if (remainBuffers == 0)
+ 		{
+ 			return 0;
+ 		}
+ 		tjs_int total = -offset;
+@@ -349,14 +349,16 @@ public:
+ 			{
+ 				idx += _bufferCount;
+ 			}
+-			total += _bufferSize[idx];
++			total += _bufferSize[idx] / _frame_size;
+ 		}
+-		return total / _frame_size;
++		return total > 0 ? total : 0;
+ 	}
+ 
+ 	virtual tjs_uint GetCurrentPlaySamples() override
+ 	{
++		tTJSCriticalSectionHolder holder(_buffer_mtx);
+ 		ALint offset = 0;
+ 		alGetSourcei(_alSource, AL_SAMPLE_OFFSET, &offset);
+ 		return _sentSamples + offset;
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -747,7 +747,11 @@ TVPWindowWindow::TVPWindowWindow(tTJSNI_Window *w)
+ 
+ #ifdef SDL_HINT_RENDER_SCALE_QUALITY
++#ifdef __EMSCRIPTEN__
++	SDL_SetHintWithPriority(SDL_HINT_RENDER_SCALE_QUALITY, "1", SDL_HINT_DEFAULT);
++#else
+ 	SDL_SetHintWithPriority(SDL_HINT_RENDER_SCALE_QUALITY, "2", SDL_HINT_DEFAULT);
++#endif
+ #endif
+ 
+ #ifdef KRKRZ_ENABLE_CANVAS
+@@ -773,10 +777,10 @@ TVPWindowWindow::TVPWindowWindow(tTJSNI_Window *w)
+ 
+ #ifdef KRKRSDL2_WINDOW_SIZE_IS_LAYER_SIZE
+ 	window_flags |= SDL_WINDOW_RESIZABLE;
+-	window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+ #ifndef __EMSCRIPTEN__
++	window_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+ 	window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+ #endif
+ 	new_window_w = 0;
+@@ -2706,6 +2710,15 @@ bool TVPWindowWindow::window_receive_event_input(const SDL_Event &event)
+ 					TVPPostInputEvent(new tTVPOnMouseWheelInputEvent(this->TJSNativeInstance, event.wheel.x, event.wheel.y, this->lastMouseX, this->lastMouseY));
+ 					return true;
+ 				}
++#ifdef __EMSCRIPTEN__
++				case SDL_FINGERMOTION:
++				case SDL_FINGERDOWN:
++				case SDL_FINGERUP:
++				{
++					// SDL already emits logical-coordinate mouse events for each touch.
++					// Dropping the normalized duplicate avoids double activation.
++					return false;
++				}
++#else
+ 				case SDL_FINGERMOTION:
+ 				{
+ 					TVPPostInputEvent(new tTVPOnTouchMoveInputEvent(this->TJSNativeInstance, event.tfinger.x, event.tfinger.y, 1, 1, event.tfinger.fingerId));
+@@ -2724,6 +2737,7 @@ bool TVPWindowWindow::window_receive_event_input(const SDL_Event &event)
+ 					}
+ 					return true;
+ 				}
++#endif
+ 				case SDL_MULTIGESTURE:
+ 				{
+ 					TVPPostInputEvent(new tTVPOnTouchScalingInputEvent(this->TJSNativeInstance, 0, event.mgesture.dDist, event.mgesture.x, event.mgesture.y, 0));
+diff --git a/external/krkrz/base/KAGParser.cpp b/external/krkrz/base/KAGParser.cpp
+--- a/external/krkrz/base/KAGParser.cpp
++++ b/external/krkrz/base/KAGParser.cpp
+@@ -1052,4 +1052,5 @@ void tTJSNI_KAGParser::GoToLabel(const ttstr &name) {
+     // search label and set current position
+     // parameter "name" must start with '*'
+-    TVPAddLog(ttstr(TJS_W("KRKR2WEB_LABEL ")) + name);
++    if(name != TJS_W("*loop"))
++        TVPAddLog(ttstr(TJS_W("KRKR2WEB_LABEL ")) + name);

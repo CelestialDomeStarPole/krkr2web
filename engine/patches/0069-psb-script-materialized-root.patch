@@ -1,0 +1,165 @@
+diff --git a/external/krkrz/plugin/psbfile/PSBRawFile.h b/external/krkrz/plugin/psbfile/PSBRawFile.h
+--- a/external/krkrz/plugin/psbfile/PSBRawFile.h
++++ b/external/krkrz/plugin/psbfile/PSBRawFile.h
+@@ -106,6 +106,7 @@ namespace PSB {
+         [[nodiscard]] bool Load(tTJSVariant value);
+         [[nodiscard]] iTJSDispatch2 *GetRootDispatch() const;
++        [[nodiscard]] iTJSDispatch2 *GetScriptRootDispatch() const;
+         [[nodiscard]] bool LoadStorage(const ttstr &name,
+                                        const OwnerFilter &filter = {});
+         [[nodiscard]] bool Adopt(std::uint8_t *data, std::size_t size,
+diff --git a/external/krkrz/plugin/psbfile/PSBFile.cpp b/external/krkrz/plugin/psbfile/PSBFile.cpp
+--- a/external/krkrz/plugin/psbfile/PSBFile.cpp
++++ b/external/krkrz/plugin/psbfile/PSBFile.cpp
+@@ -1,13 +1,16 @@
+ #include <cassert>
+ #include <cstdint>
+ #include <cstring>
+ #include <string>
+ 
++#include "CharacterSet.h"
+ #include "MsgIntf.h"
+ #include "PSBMediaRegistry.h"
+ #include "PSBDispatch.h"
+ #include "PSBPackedInternal.h"
+ #include "PSBRawFile.h"
+ #include "ncbind.hpp"
+ #include "tjs.h"
++#include "tjsArray.h"
++#include "tjsDictionary.h"
+ #include "tjsNative.h"
+ 
+ #define NCB_MODULE_NAME TJS_W("PSBFile.dll")
+@@ -17,6 +20,111 @@ using PSB::PSBRawNode;
+ 
+ namespace PSB {
++    namespace {
++        ttstr utf8ToTjs(const std::string &value) {
++            tjs_string wide;
++            if(TVPUtf8ToUtf16(wide, value)) {
++                return ttstr(wide);
++            }
++            // Some old PSBs contain Shift-JIS labels. Preserve the engine's
++            // native narrow-string fallback when the buffer is not UTF-8.
++            return ttstr(value);
++        }
++
++        tTJSVariant materializeScriptValue(const PSBFile &file,
++                                            const std::uint8_t *node) {
++            switch(detail::GetTypeCategory_guess(node[0])) {
++                case 0:
++                    return tTJSVariant();
++                case 1:
++                    return tTJSVariant(
++                        detail::DecodeNumberAsBoolean_guess(node));
++                case 2:
++                    if(node[0] <= 0x08) {
++                        return tTJSVariant(static_cast<tjs_int64>(
++                            detail::DecodeInteger32_guess(node)));
++                    }
++                    return tTJSVariant(
++                        detail::DecodeInteger64_guess(node));
++                case 3:
++                    return tTJSVariant(
++                        detail::DecodeNumberAsDouble_guess(node));
++                case 4: {
++                    const PSBRawNode value(file, node);
++                    const char *text = value.GetString();
++                    return text ? tTJSVariant(utf8ToTjs(text))
++                                : tTJSVariant();
++                }
++                case 5: {
++                    const PSBRawNode value(file, node);
++                    std::uint32_t size = 0;
++                    const std::uint8_t *data = value.GetResource(size);
++                    return data ? tTJSVariant(data, size) : tTJSVariant();
++                }
++                case 6: {
++                    iTJSDispatch2 *array = TJSCreateArrayObject();
++                    try {
++                        const std::uint8_t *packed = node + 1;
++                        const detail::PsbArray_guess offsets(packed);
++                        const std::uint8_t *values =
++                            packed + offsets.nBytes;
++                        for(std::uint32_t index = 0;
++                            index < offsets.nElementCount; ++index) {
++                            tTJSVariant value = materializeScriptValue(
++                                file, values + offsets[index]);
++                            array->PropSetByNum(
++                                TJS_MEMBERENSURE,
++                                static_cast<tjs_int>(index), &value, array);
++                        }
++                        tTJSVariant result(array, array);
++                        array->Release();
++                        return result;
++                    } catch(...) {
++                        array->Release();
++                        throw;
++                    }
++                }
++                case 7: {
++                    iTJSDispatch2 *dictionary = TJSCreateDictionaryObject();
++                    try {
++                        const std::uint8_t *packed = node + 1;
++                        const detail::PsbArray_guess keys(packed);
++                        const detail::PsbArray_guess offsets(
++                            packed + keys.nBytes);
++                        const std::uint8_t *values = packed + keys.nBytes +
++                            offsets.nBytes;
++                        std::string key;
++                        for(std::uint32_t index = 0;
++                            index < keys.nElementCount; ++index) {
++                            detail::DecodeName_guess(
++                                key, file.GetOwner(), keys[index]);
++                            const ttstr member = utf8ToTjs(key);
++                            tTJSVariant value = materializeScriptValue(
++                                file, values + offsets[index]);
++                            dictionary->PropSet(
++                                TJS_MEMBERENSURE, member.c_str(), nullptr,
++                                &value, dictionary);
++                        }
++                        tTJSVariant result(dictionary, dictionary);
++                        dictionary->Release();
++                        return result;
++                    } catch(...) {
++                        dictionary->Release();
++                        throw;
++                    }
++                }
++                default:
++                    return tTJSVariant();
++            }
++        }
++    } // namespace
++
+     PSBValueDispatch::PSBValueDispatch(
+         const PSBFile &file, const std::uint8_t *node) :
+@@ -686,6 +794,20 @@ namespace PSB {
+         return new PSBValueDispatch(*this, owner->GetHeader()->entries);
+     }
++
++    iTJSDispatch2 *PSBFile::GetScriptRootDispatch() const {
++        PSBRawOwner *owner = GetOwner();
++        if(owner == nullptr) {
++            return nullptr;
++        }
++        tTJSVariant root = materializeScriptValue(
++            *this, owner->GetHeader()->entries);
++        if(root.Type() != tvtObject || !root.AsObjectNoAddRef()) {
++            return nullptr;
++        }
++        iTJSDispatch2 *dispatch = root.AsObjectNoAddRef();
++        dispatch->AddRef();
++        return dispatch;
++    }
+ } // namespace PSB
+ 
+ template <typename T>
+@@ -737,6 +859,6 @@ static tjs_error PSBFileFactory(PSBFile **result, tjs_int count,
+ 
+ NCB_REGISTER_CLASS(PSBFile) {
+     Factory(PSBFileFactory);
+-    Property(TJS_W("root"), &PSBFile::GetRootDispatch, 0);
++    Property(TJS_W("root"), &PSBFile::GetScriptRootDispatch, 0);
+     Method(TJS_W("load"), &PSBFile::Load);
+ }

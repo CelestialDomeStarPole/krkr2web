@@ -32,7 +32,10 @@ void TVPLoadWEBP(void *formatdata, void *callbackdata,
     if(mode == glmNormal || mode == glmNormalRGBA) {
         const int stride = w * 4;
         std::unique_ptr<uint8_t[]> out(new uint8_t[stride * h]);
-        config.output.colorspace = MODE_RGBA;
+        // KRKR's normal 32-bit bitmap layout is BGRA. glmNormalRGBA is the
+        // explicit RGBA exception used by callers that request channel order.
+        config.output.colorspace =
+            mode == glmNormalRGBA ? MODE_RGBA : MODE_BGRA;
         config.output.u.RGBA.rgba = out.get();
         config.output.u.RGBA.stride = stride;
         config.output.u.RGBA.size = stride * h;

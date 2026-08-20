@@ -1,14 +1,15 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -182,8 +182,12 @@
+@@ -194,4 +194,7 @@
+ 	external/krkrz/plugin/textrender/TextRender.cpp
  	external/krkrz/plugin/layerExImage/LayerExImage.cpp
  	external/krkrz/plugin/layerExImage/Main.cpp
- 	external/krkrz/web/plugin_compat.cpp
 +	external/krkrz/plugin/layerExRaster.cpp
 +	external/krkrz/plugin/layerExBTOA.cpp
 +	external/krkrz/plugin/PackinOne.cpp
- )
+ 	external/krkrz/web/plugin_compat.cpp
+@@ -206,4 +209,5 @@
  list(APPEND KRKRSDL2COMMON_INCLUDES
  	external/krkrz/plugin
  	external/krkrz/web

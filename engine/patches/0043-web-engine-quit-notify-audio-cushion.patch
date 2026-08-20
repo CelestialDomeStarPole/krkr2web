@@ -1,0 +1,28 @@
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -2916,6 +2916,12 @@
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++				// krkr2web: notify the host page BEFORE cancelling the loop;
++				// after cancellation no more ticks run and the player would
++				// otherwise classify the self-terminated engine as stalled.
++				EM_ASM(
++					if (globalThis.krkr2webEngineQuit) globalThis.krkr2webEngineQuit();
++				);
+ 				emscripten_cancel_main_loop();
+ #else
+ 				return false;
+
+diff --git a/src/core/sound/sdl2/OpenALWaveMixer.h b/src/core/sound/sdl2/OpenALWaveMixer.h
+--- a/src/core/sound/sdl2/OpenALWaveMixer.h
++++ b/src/core/sound/sdl2/OpenALWaveMixer.h
+@@ -6,9 +6,13 @@
+ #ifdef __EMSCRIPTEN__
+-#define TVPAL_BUFFER_COUNT 16
++// krkr2web: 32 queued 125ms units = 4s of buffered audio. Image decode
++// bursts measured up to ~2.1s on low-end devices; the previous 2s of
++// cushion still underran occasionally.
++#define TVPAL_BUFFER_COUNT 32
+ #else
+ #define TVPAL_BUFFER_COUNT 4
+ #endif

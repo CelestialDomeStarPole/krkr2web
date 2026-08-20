@@ -1,0 +1,30 @@
+diff --git a/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp b/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
+--- a/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
++++ b/external/krkrz/plugin/motionplayer/PlayerRenderInternal.cpp
+@@ -627,7 +627,10 @@
+ 
+         auto *dstBmp = dstLayer->GetMainImage();
+         auto *srcBmp = srcLayer->GetMainImage();
+-        const auto &dstClip = dstLayer->GetClip();
++        const tTVPRect dstClip(
++            dstLayer->GetClipLeft(), dstLayer->GetClipTop(),
++            dstLayer->GetClipLeft() + dstLayer->GetClipWidth(),
++            dstLayer->GetClipTop() + dstLayer->GetClipHeight());
+         const int dstImageWidth = static_cast<int>(dstLayer->GetImageWidth());
+         const int dstImageHeight = static_cast<int>(dstLayer->GetImageHeight());
+         const int srcImageWidth = static_cast<int>(srcLayer->GetImageWidth());
+diff --git a/external/krkrz/plugin/motionplayer/SourceCache.cpp b/external/krkrz/plugin/motionplayer/SourceCache.cpp
+--- a/external/krkrz/plugin/motionplayer/SourceCache.cpp
++++ b/external/krkrz/plugin/motionplayer/SourceCache.cpp
+@@ -165,7 +165,10 @@
+         }
+ 
+         auto *nativeLayer = resolveNativeLayer(layer.AsObjectNoAddRef());
+-        const tTVPRect clip = nativeLayer->GetClip();
++        const tTVPRect clip(
++            nativeLayer->GetClipLeft(), nativeLayer->GetClipTop(),
++            nativeLayer->GetClipLeft() + nativeLayer->GetClipWidth(),
++            nativeLayer->GetClipTop() + nativeLayer->GetClipHeight());
+         auto *pixelBuffer = static_cast<std::uint8_t *>(
+             nativeLayer->GetMainImagePixelBufferForWrite());
+         const tjs_int pitch = nativeLayer->GetMainImagePixelBufferPitch();

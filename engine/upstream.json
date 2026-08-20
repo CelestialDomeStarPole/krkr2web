@@ -68,6 +68,14 @@
         {
           "source": "cpp/plugins/scriptsEx.cpp",
           "target": "external/krkrz/plugin/scriptsEx.cpp"
+        },
+        {
+          "source": "cpp/plugins/windowEx.cpp",
+          "target": "external/krkrz/plugin/windowEx.cpp"
+        },
+        {
+          "source": "cpp/plugins/win32_dt.h",
+          "target": "external/krkrz/plugin/win32_dt.h"
         }
       ]
     },
@@ -81,6 +89,53 @@
         {
           "source": "main.cpp",
           "target": "external/krkrz/plugin/csvParser/main.cpp"
+        }
+      ]
+    },
+    {
+      "name": "Kirikiroid2WebMotionRuntime",
+      "repository": "https://github.com/fenghengzhi/kirikiroid2-web.git",
+      "commit": "338d2029f16969b84becfd163c67f99740e28296",
+      "localCheckout": "参考资料/开源项目/kirikiroid2-web",
+      "license": "LICENSE",
+      "directories": [
+        {
+          "source": "cpp/plugins/motionplayer",
+          "target": "external/krkrz/plugin/motionplayer"
+        },
+        {
+          "source": "cpp/plugins/psbfile",
+          "target": "external/krkrz/plugin/psbfile"
+        }
+      ],
+      "files": [
+        {
+          "source": "cpp/plugins/BinaryAccessor.cpp",
+          "target": "external/krkrz/plugin/BinaryAccessor.cpp"
+        },
+        {
+          "source": "cpp/plugins/xp3filter.cpp",
+          "target": "external/krkrz/plugin/xp3filter.cpp"
+        },
+        {
+          "source": "cpp/plugins/xp3filter.h",
+          "target": "external/krkrz/plugin/xp3filter.h"
+        },
+        {
+          "source": "cpp/plugins/DrawDeviceD3DIntf.h",
+          "target": "external/krkrz/plugin/DrawDeviceD3DIntf.h"
+        },
+        {
+          "source": "cpp/core/visual/RenderManager.h",
+          "target": "external/krkrz/plugin/motionplayer/RenderManager.h"
+        },
+        {
+          "source": "cpp/core/visual/ogl/imagepacker.cpp",
+          "target": "external/krkrz/core/visual/ogl/imagepacker.cpp"
+        },
+        {
+          "source": "cpp/core/visual/ogl/imagepacker.h",
+          "target": "external/krkrz/core/visual/ogl/imagepacker.h"
         }
       ]
     }
@@ -119,6 +174,40 @@
     "patches/0032-layer-raster-btoa-packinone.patch",
     "patches/0033-layerexdraw-stub.patch",
     "patches/0034-kag-diagnostics.patch",
-    "patches/0035-emscripten-input-path.patch"
+    "patches/0035-emscripten-input-path.patch",
+    "patches/0036-kag-emb-unescaped-expansion.patch",
+    "patches/0038-ogg-vorbis-streaming.patch",
+    "patches/0039-web-transition-fallback-force-terminate.patch",
+    "patches/0040-web-perf-graphic-cache-audio-fill.patch",
+    "patches/0041-web-trans-throttle-heartbeat-stats.patch",
+    "patches/0042-web-video-overlay-bridge.patch",
+    "patches/0043-web-engine-quit-notify-audio-cushion.patch",
+    "patches/0044-web-audio-position-input-perf.patch",
+    "patches/0045-web-gpu-style-present-fast-transition.patch",
+    "patches/0046-web-input-frame-budget.patch",
+    "patches/0047-tjs-readi8-compat.patch",
+    "patches/0048-motionplayer-layer-clip-compat.patch",
+    "patches/0049-motionplayer-layer-mesh-port.patch",
+    "patches/0050-motionplayer-wasm-simd-feature-gate.patch",
+    "patches/0051-motionplayer-web-software-private-layer-gate.patch",
+    "patches/0053-emscripten-threaded-variant-exports.patch",
+    "patches/0054-emscripten-feature-option-conditions.patch",
+    "patches/0055-emscripten-thread-simd-flag-scope.patch",
+    "patches/0057-emscripten-threaded-worker-environment.patch",
+    "patches/0058-emscripten-threaded-host-bridges.patch",
+    "patches/0059-native-windowex-plugin.patch",
+    "patches/0060-async-html5-pthread-events.patch",
+    "patches/0061-windowex-web-platform-module.patch",
+    "patches/0062-dedicated-worker-offscreen-canvas.patch",
+    "patches/0063-motionplayer-tjs-array-container-compat.patch",
+    "patches/0064-binary-accessor-build-boundary.patch",
+    "patches/0065-motionplayer-resource-manager-krkrsdl2-api.patch",
+    "patches/0066-motionplayer-krkrsdl2-layer-texture-boundary.patch",
+    "patches/0067-motionplayer-private-gll-web-stub-signature.patch",
+    "patches/0068-motionplayer-target-texture-limit.patch",
+    "patches/0069-psb-script-materialized-root.patch",
+    "patches/0070-motionplayer-software-color-modulation.patch",
+    "patches/0071-win32dialog-shim.patch",
+    "patches/0072-web-skip-user-cfu-config.patch"
   ]
 }

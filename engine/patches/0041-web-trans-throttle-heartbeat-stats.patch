@@ -1,0 +1,62 @@
+diff --git a/external/krkrz/visual/TransIntf.cpp b/external/krkrz/visual/TransIntf.cpp
+--- a/external/krkrz/visual/TransIntf.cpp
++++ b/external/krkrz/visual/TransIntf.cpp
+@@ -9,6 +9,12 @@
+ //---------------------------------------------------------------------------
+ // Transition handler mamagement & default transition handlers
+ //---------------------------------------------------------------------------
++#if defined(__EMSCRIPTEN__) && !defined(TVP_TRANS_SHOW_FPS)
++// krkr2web: enable the built-in transition cost instrumentation on web
++// builds; KRKR2WEB_D5_TRANS_STATS below reports per-transition costs.
++#define TVP_TRANS_SHOW_FPS
++#endif
++
+ #include "tjsCommHead.h"
+ 
+ #include "TransIntf.h"
+@@ -566,6 +571,15 @@
+ 			tjs_int fps = Count * 1000 / (tick - StartTick);
+ 			TVPAddLog(TJS_W("fps : ") + ttstr(fps));
+ 
++#ifdef __EMSCRIPTEN__
++			// krkr2web: one stdout marker per transition (this block fires
++			// once, at the transition midpoint) for on-device diagnosis.
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_TRANS_STATS time_ms=")) + ttstr((tjs_int)(tick-StartTick))
++				+ ttstr(TJS_W(" process_ms=")) + ttstr((tjs_int)ProcessTime)
++				+ ttstr(TJS_W(" blend_ms=")) + ttstr((tjs_int)BlendTime)
++				+ ttstr(TJS_W(" updates=")) + ttstr(Count)
++				+ ttstr(TJS_W(" fps=")) + ttstr(fps));
++#endif
+ 			Count = 0;
+ 		}
+ 	}
+
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -2934,6 +2934,20 @@
+ 	}
+ #endif
+ 
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++	{
++		// krkr2web: JS heartbeat every 4 ticks so the player can detect a
++		// stalled main loop. Counting ticks (not wall time) keeps slow load
++		// frames from starving the heartbeat; the player's threshold is wall
++		// time. An Asyncify suspension that never resumes hangs the engine
++		// silently; without heartbeats the freeze is indistinguishable from
++		// normal idle waiting.
++		static tjs_int heartbeat_counter = 0;
++		if((heartbeat_counter++ & 3) == 0)
++		{
++			EM_ASM(
++				if (globalThis.krkr2webEngineHeartbeat)
++					globalThis.krkr2webEngineHeartbeat();
++			);
++		}
++	}
++#endif
++
+ #if !defined(__EMSCRIPTEN__) || (defined(__EMSCRIPTEN__) && defined(__EMSCRIPTEN_PTHREADS__))
+ 	return true;
+ #endif

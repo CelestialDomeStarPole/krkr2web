@@ -4,6 +4,42 @@
 > [开发路线图](10-development-roadmap.md#d5千恋万花兼容与性能)，
 > 首版通过条件见 [测试与验收](07-test-acceptance.md#千恋万花首版通过条件)。
 
+## 2026-08-15 剧情首屏与崩溃恢复里程碑
+
+真实《千恋万花》已经从完整简体中文标题页进入 `CHAPTER 1-1`，底部剧情文字
+可正确渲染。最终本机 Chrome 验证为：XP3 读取无错误、`firstError=null`、无
+致命弹窗，标题页配色与用户提供的基准一致。4.04 GB 已缓存游戏资源的内容版本
+和 IndexedDB 身份保持不变，用户无需重新下载。
+
+标题页之后新增或完成的关键兼容修复如下：
+
+1. 补丁 0035 调整 SDL 输入路径，事件观察器只负责排队，游戏逻辑回到主循环
+   执行，避免 DOM 回调嵌套进入 Asyncify；
+2. `TextRender.cpp` 中 21 处真假值读取改为显式 `tTJSVariant::operator bool()`，
+   修复 `start.ks:43` 的“Cannot convert the variable type ((int)0 to Object)”；
+3. 《千恋万花》配置增加 `-deffont=Source Han Sans SC`，WebAssembly 不再依赖
+   Android 系统中并不存在的 `Noto Sans CJK JP`，剧情字体加载成功；
+4. OGG 改为流式 Vorbis 解码，避免把长音频一次性完整展开到内存；
+5. 用户点击“启动游戏”时预先创建处于 `running` 状态的 AudioContext，OpenAL
+   复用该上下文，标题页随机角色语音不再因脱离用户手势而静音。
+
+产品壳同时增加了两项崩溃恢复能力：
+
+- “存档”页可以按剧情、快速、系统和其他类别查看本机文件，显示修改时间和
+  大小，并支持删除选中或删除全部；删除前会先停止引擎并解除 IDBFS 占用。
+- 播放器和游戏库均提供“强制重启”。重启会在同一 HTML 和同一 URL 内同步
+  存档、终止旧 Wasm、释放 IDBFS/XP3/音频资源、替换 Canvas，再创建全新引擎
+  实例。播放器会捕获致命弹窗，崩溃后再次启动自动执行这条恢复流程。
+
+`tests.test_d3_tools`、`tests.test_d5_profiles`、`tests.test_d5_tools` 共 20 项测试
+通过；D4 浏览器回归覆盖断网零请求启动、存档管理、主动重启和模拟崩溃恢复。
+下文较早的“黑屏/标题未渲染/输入阻断”内容仅保留为历史排障依据，不再代表
+当前状态。
+
+当前下一验收点是真机复核标题语音、新游戏剧情首屏、存档列表和强制重启；随后
+继续推进真实存读档、长剧情兼容和稳定性。motionplayer 动画与 WMV/AlphaMovie
+视频仍未实现，其中视频是后续版本的硬性范围，不得从路线图移除。
+
 ## 当前结论
 
 真实《千恋万花》三个 XP3（合计 4,044,268,983 字节）已能通过 D5 兼容探针
@@ -294,3 +330,240 @@ TVPClearStorageCaches 等）；仅以下约 7 组文件/存储函数缺失，需
 AppStoragePath 返回固定路径）。至此 fstat 移植的完整成本已收敛并量化：
 NCB 框架 + 字符串构造 + 日志桩 + 少量缺失 include + 上述存储垫片。
 
+## extrans 转场降级 + 主循环强制终止（2026-08-15）
+
+真机报告（20260815-091615）确认：系统设置 option.ks:22 与剧情树 load.ks:23
+请求 `[trans type=wave]`，extrans 未注册导致致命错误
+"Cannot find transition handler wave"，两个页面全部卡死。
+
+**决策**：extrans 完整移植依赖 kirikiroid2-web 的 RenderManager（见 §12），
+成本高；先保功能、舍特效。补丁 0039 在 `TVPFindTransHandlerProvider` 的
+Emscripten 分支里，对 extrans 的 7 个转场名（wave/mosaic/turn/rotatezoom/
+rotatevanish/rotateswap/ripple）找不到 provider 时打印
+`KRKR2WEB_D5_TRANS_FALLBACK <name>` 并回落到内置 crossfade。页面内容与
+交互完整保留，仅不复刻波浪/旋转等视觉特效。若后续真移植 extrans，
+provider 注册后该回落自动失效（只在 Find 失败时介入）。
+
+同补丁为 kremscripten.cpp 增加 `forceTerminate` JS 绑定
+（`emscripten_cancel_main_loop`），播放器重启链路随之改造：
+
+- 普通重启（restart）：显示状态 → syncSaves(force) → forceTerminate →
+  重建实例。不再等待引擎自行退出（此前崩溃后重启无响应的根因——
+  停止流程会 await 已死的 TJS 协程）。
+- 强制终止（forceStop）：跳过存档同步，直接 forceTerminate。
+
+### Windows 构建流水线修复（本机原生构建）
+
+此前构建在 DSH 沙箱（Linux）执行；本机（Git Bash/PowerShell）首次构建
+暴露两个问题，均已修复：
+
+1. GNU tar 把 `D:\...` 当 host:path 远程地址（"Cannot connect to D:"）。
+2. 源码库 7 个 symlink（全部在 android-project/ 脚手架）无法在无特权
+   Windows 上创建。
+
+修复：新增 `tools/extract_tar.py`（Python tarfile 提取，symlink 物化为
+含目标路径的纯文本——与 git core.symlinks=false 检出一致），build_d3.ps1
+的 tar 调用全部换成该工具；git archive --output 保持绝对路径（相对路径
+会落进 -C 目录污染上游检出）。单测
+`test_source_export_extractor_materializes_symlinks` 覆盖。
+
+### 真机验证（2026-08-15 18:03 报告 20260815-100305）
+
+补丁 0039 后首次真机回归：系统设置（option.ks）与剧情树（load.ks）均可
+正常进入，全报告无 "Cannot find transition handler"、无致命 alert、无崩溃。
+标题流程完整（title.ks → *wait，VORBIS_STREAMING_READY 即 BGM 流式播放正常），
+工具栏强制终止正常（stopReason=player-toolbar，报告于停止后成功上传）。
+注意 engineLog 为 96 行环形缓冲，仅覆盖最后一个会话——本轮报告的日志段
+不含设置/剧情树访问痕迹属预期，以用户确认 + 零 wave 报错为准。
+
+剩余 NOOP：extrans.dll（转场已由 crossfade 降级承接）、extNagano.dll
+（游戏特有，仍未定位源）；motion.tjs load 启动异常仍存在（motionplayer
+bootstrap-only，非致命）。
+
+## 转场卡顿优化第一轮（2026-08-15 晚）
+
+真机反馈：进标题、进设置、回标题等页面转场时画面与音频同时卡顿。
+根因分析（无线程构建，一切都在主线程上）：
+
+1. **图形缓存被禁用（主因）**：缓存上限 = 物理内存/10，但 Emscripten libc
+   无 _SC_PHYS_PAGES 数据 → SDL_GetSystemRAM()=0 → SystemLimit=0 →
+   TVPGraphicCacheLimit=0。游戏 1920x1050 全屏图（解码后 8MB/张）每次进
+   页面都重新 XP3 解压 + WebP 解码，一次 0.5-2s 的主线程停顿。
+2. **音频队列恢复过慢**：OpenAL 队列上限 16×125ms=2s，但补给速率只有
+   125ms/60ms（每 tick 一单元），一次停顿后队列需数秒才能补满，期间
+   任何再次停顿都会爆音。BGM 刚起播时队列很浅，最易爆音。
+3. **转场逐帧全屏混合**：crossfade 每 tick 对 8MB×2 层做逐像素混合，
+   弱设备上单帧 50-200ms（此为固有成本，本轮先不动，等 PERF 数据）。
+
+补丁 0040 三项：
+- SysInit：emscripten 下 SystemLimit 默认 128MB（-gclim 可覆盖），启动时
+  若无人设置缓存则启用到上限，日志 KRKR2WEB_D5_GRAPHIC_CACHE <MB>。
+- WaveImpl InternalTrigger：预算 8ms 循环补填直到队列满（FillBuffer 返回
+  true 表示满/暂停/结束）。
+- process_events：每 5s 输出 KRKR2WEB_D5_PERF ticks/avg_ms/max_ms/slow50
+  逐帧耗时直方图（含 Asyncify 挂起等待），用于验证与定位下一瓶颈。
+
+预期：回访页面（缓存命中）不再解码 → 卡顿大幅缩短；音频队列保持满
+→ 停顿期间不再爆音。首次进页面仍有解码突发（无线程无法分片），由
+PERF 数据决定是否做转场 30Hz 节流等第二轮优化。
+
+### 补丁应用器加固（2026-08-15 晚，随补丁 0040 一轮）
+
+首次构建 0040 时暴露 apply_patch.py 的一个静默截断缺陷：把"空上下文行"
+写成真正的空行时，解析器将其视为 hunk 结束，后续 +/- 行被丢弃，而
+check/apply 仍报成功（实际是原样换原样的 no-op）。导致 0040 只有
+WaveImpl/SDLApplication 两个 hunk 落地，SysInit 缓存修复与 PERF 直方图
+被静默丢弃。已修复并加单测：
+
+- 空行后紧跟补丁内容行（+/-/空格开头）→ 按 git 宽容语义视为空上下文行；
+- hunk 终止后出现孤儿 +/- 内容行 → 立即抛错（不再静默丢内容）。
+
+教训：wasm 内只能验证字符串常量（GRAPHIC_CACHE/PERF 为 UTF-16 字面量
+可查），局部变量名（fill_deadline）在 MinSizeRel 下会被剥离，不可作
+验证依据；验证以源码树 + 构建管线严格检查为准。
+
+### 真机缓存导致的"缺少引擎配置"（2026-08-15 晚）
+
+重新部署优化构建后，真机报"无法启动游戏 缺少引擎配置：senren-banka-v1"。
+服务端注册表完好（顶层 schemaVersion=1、含 senren-banka-v1），index.html
+引用齐全——结论：Android WebView（Chrome 89）在服务器重启/重新部署后
+对 no-cache 子资源使用了陈旧的 HTTP 缓存（旧版 engine-profiles.js 没有
+顶层 schemaVersion，恰好触发 player.js 的注册表校验失败）。
+
+修复（tools/stamp_build_versions.py，接入 prepare_d5_product.ps1）：
+- 所有静态资源引用加内容哈希版本参数（?v=sha256[:8]），index.html 重新
+  验证后只能拉到与哈希匹配的脚本，缓存自愈；
+- player.js 内的 wasm URL 同样版本化（注意：必须先改 player.js 再算其
+  哈希，否则 index.html 引用过期版本）；
+- 诊断报告新增 engineProfiles 快照（schemaVersion + profileIds），
+  下次报告可直接证明注册表加载状态。
+
+## 性能第二轮 + 卡死取证（2026-08-15 深夜，补丁 0041）
+
+报告 20260815-110112 的 PERF 数据（新增直方图首次真机数据）：
+
+- 静止（标题 *loop）：ticks=437/5s avg 4ms max 34ms——60fps 完美；
+- 转场窗口：ticks=94/5s（19fps）avg 45ms **max 1630ms**、另一窗 max 849ms
+  ——卡顿全部集中在转场：每帧全屏混合（1920x1050，8MB/层×2）+ 首次
+  进页解码突发（缓存只救回访）。
+
+真机还报告新问题：对话页闲置一段时间后引擎整个卡死（只能强制终止）。
+嫌疑：Asyncify 挂起的 DecompressionStream 读取承诺永不结算（0006 的
+await 无超时），引擎静默挂起；但卡死会话日志被 96 行环形缓冲覆盖，
+缺少直接证据。
+
+补丁 0041 四项：
+1. InvokeTransition 30Hz 节流（转场相位按墙钟推进，跳帧不延迟转场，
+   只减半混合+合成成本）；
+2. KRKR2WEB_D5_TRANS_STATS（time/process/blend/updates/fps，每次转场
+   中点输出一行，复用 TVP_TRANS_SHOW_FPS 累计器，仅 emscripten 定义）；
+3. 引擎 ~1Hz JS 心跳（64 tick 一次 EM_ASM 回调 krkr2webEngineHeartbeat）
+   + player.js 看门狗：页面可见且主循环停跳 >5s → 状态栏报"引擎疑似
+   卡死"+ errors 记录 KRKR2WEB_D5_STALL——下次报告可区分"挂起等待"
+   与"正常闲置"，并保留卡死时刻；
+4. 0006 解压读取加 30s 超时（Promise.race，超时走 catch 返回 -3 →
+   引擎抛可见的存储错误，不再静默挂死）。
+
+## 通用性原则与视频桥（2026-08-15 深夜，补丁 0042）
+
+用户提出关键方向要求：不能针对千恋万花特调，需对所有 KRKR 游戏通用。
+审计结论：
+
+- **引擎层零游戏特调**：engine/patches、engine/plugins、engine/web 全文
+  grep 无任何游戏名/厂商名。per-game 内容只存在于 engine/profiles/
+  （这正是配置层的正确位置）。
+- 观察到的两处行为差异（缺 logo/厂商页、标题语音时机）根因是**未实现的
+  通用子系统**，不是特调：
+  1. VideoOverlay 在非 Win32 下 Play() 是空操作 → 游戏 28 个 WMV
+     （1.4GB，含 OP/ED/logo/厂商视频）全部静默跳过；
+  2. motionplayer（.mtn Emote 动画）bootstrap-only 垫片 → 动画缺失/
+     时机漂移（语音常与动画同步）。KAGParserEx 缺失也可能参与。
+
+**通用视频桥**（补丁 0042，对任何 KRKR 游戏生效）：
+- 引擎：VideoOverlay Open/Play/Stop/Pause 桥接到页面
+  （krkr2webVideoOpen/Play/Stop/Pause，EM_JS）；播放结束时页面调
+  krkr2webVideoEnded（embind）→ SetStatus(Stop) 走原生
+  onStatusChanged 事件队列——游戏脚本观察到与 win32 krmovie 一致的
+  播放语义。页面未定义钩子或无转码文件时保持原"跳过"行为。
+- 页面：player.js 以 <video> DOM 覆盖层播放（对齐画布矩形，
+  object-fit:contain），按存储名 basename 映射
+  /videos/<gameId>/<stem>.webm；error/ended→回调引擎。
+- 服务器：--video-directory 把 build/video-transcode/ 挂到 /videos/
+  （resolve + is_relative_to 防穿越）。
+- 转码工具 tools/transcode_game_videos.py：从游戏 XP3 提取视频扩展名
+  文件 → ffmpeg 转 webm（VP8+Vorbis，Chrome 89 兼容），幂等可重跑。
+  profile videoStrategy 更新为 webm-bridge。
+
+已知限制（后续工作）：vomLayer 模式（视频进图层）暂以覆盖层呈现；
+循环视频（loop=true）由引擎显式 Stop 结束；motionplayer/KAGParserEx
+真移植仍是保真度差距的主要来源。
+
+## 看门狗误报修复 + 卡死现场保存（2026-08-15 深夜二轮）
+
+报告 20260815-114928 证实误报机制：PERF 显示标题加载窗口
+avg_ms=35 max_ms=2117（单帧最长 2.1s），心跳按 64-tick 计数 → 墙钟
+间隔轻松超 5s 阈值，而主循环存活（随后"已恢复"）。真实卡死现场再次
+被后续会话的 96 行环形缓冲覆盖。
+
+修复：
+- 心跳改为每 4 tick（补丁 0041 更新），阈值 15s、恢复线 3s；
+- 警报文案区分卡死类型：看门狗定时器本身能触发 → JS 事件循环存活
+  → 引擎挂起在 Asyncify 等待（而非主线程同步阻塞）；
+- terminateInstance 把 {stopReason, crashed, stalledAt, stallSilentMs,
+  lastLog(40 行)} 存入 localStorage，报告新增 lastSession 字段——
+  卡死后的重启不再销毁证据。
+
+### 事故记录：player.js 语法损坏导致"无法读取游戏目录"（2026-08-15 深夜三轮）
+
+上轮删除旧看门狗定时器时行号偏移多删了 krkr2webVideoPause 的闭合
+"};"，player.js 整体解析失败 → window.krkr2Player 未定义 → 游戏库
+报 "Cannot read properties of undefined (reading 'snapshot')"。
+已修复并验证。防御：check_d4_artifacts.py 新增 --node 参数，prepare
+自动用 emsdk 的 node 对全部 web 脚本做 --check 语法门禁（已做注入
+损坏的反向验证，可拦截此类问题上线）。
+
+## 闲置卡死根因定位与存储桥加固（2026-08-15 深夜四轮）
+
+报告 20260815-121205 的 lastSession 现场给出决定性证据：
+
+- stalledAt 12:11:57.870 / stallSilentMs 15271，看门狗定时器自身触发
+  → JS 事件循环存活 → **引擎挂在 Asyncify 等待**（非主线程阻塞）；
+- 冻结前最后一行日志是健康的标题循环（PERF ticks=426 avg 5ms）——
+  无任何报错，引擎在两次正常帧之间静默；
+- 每次冻结前均为 *loop + clickglyph.asd 重读周期。
+
+根因定位（存储桥 probes/d3-engine/web/storage.js）：
+1. loadChunk **每读一个块都 openDatabase()+close()**——标题闪烁图标
+   每周期 2 次读取 = 高频开合连接，WebView 下 open 请求可能永不回调；
+2. requestResult 不处理 **transaction.onabort**——中止的事务既不
+   onsuccess 也不 onerror，承诺永不结算 → 引擎挂起。
+两者都能造成"正常帧之间突然静默"的冻结形态。
+
+修复（通用，所有游戏受益）：
+- 持久连接（getDatabase 共享，onversionchange 自愈，releaseAll 关闭）；
+- requestResult 增加 transaction.onabort 拒绝路径；
+- 全部 IDB 操作 20s 超时（withTimeout）——即使再挂也转为可见的
+  存储错误而非死等；
+- 挂起操作追踪（window.krkr2webStorageTrace）+ 看门狗警报附带
+  "挂起操作: op detail 已 N 秒"——若仍冻结，下一份报告直接点名
+  挂起的操作与数据块。
+
+## 流畅度/音频垫/退出误判三项（2026-08-15 深夜五轮，补丁 0043）
+
+用户反馈：不再卡死，但不流畅、音频偶发断续、音频进度条常不动、
+正常退出被判为卡死。
+
+1. **正常退出误判**：引擎自杀路径（TVPSystemUninit → cancel_main_loop）
+   从不通知页面，看门狗 15s 后误报。补丁 0043 在 cancel 前发
+   EM_ASM(krkr2webEngineQuit)；player 响应 → 干净 stop（同步存档）
+   → 自动回游戏库。
+2. **音频偶发断续**：解码突发实测最长 ~2.1s，16×125ms=2s 队列刚好被
+   打穿。队列上限提至 32×125ms=4s（OpenALWaveMixer.h）。
+3. **渲染分辨率**：此前引擎按画布全分辨率合成（1920x1050），而游戏
+   原生 1280x720——每帧多算 2.25 倍像素。profile display 改 720p，
+   player 启动前把 canvas 内部分辨率设为 1280x720，CSS 拉伸铺满。
+   这是最大的单项流畅度杠杆（合成/混合/上传全链路减 44% 像素量）。
+
+待验证：音频进度条（GetCurrentPlaySamples→AL_SAMPLE_OFFSET，
+emscripten sourceTell 依赖 bufQueue[0]，实现存在；若 720p 后仍不动，
+下一轮用 PlaySoundPosition 诊断区分引擎侧/游戏 UI 侧）。

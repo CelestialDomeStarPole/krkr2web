@@ -53,11 +53,13 @@ def main() -> None:
         raise SystemExit("D5 profile has an invalid entry package")
     if profile.get("autoPathPackages") != ["adult.xp3", "video.xp3"]:
         raise SystemExit("D5 profile does not mount both secondary archives")
-    if profile.get("plugins", {}).get("motionplayer.dll") != "bootstrap-only":
-        raise SystemExit("D5 profile overstates motionplayer compatibility")
+    if profile.get("plugins", {}).get("motionplayer.dll") != "native-lazy-psb":
+        raise SystemExit("D5 profile must enable the native lazy-PSB Motion runtime")
+    if any(argument.startswith("-krkr2web-motion-bootstrap") for argument in profile.get("engineArguments", [])):
+        raise SystemExit("D5 profile must not retain the legacy Motion isolation switch")
     if "-debugwin=no" not in profile.get("engineArguments", []):
         raise SystemExit("D5 profile must disable the unavailable Win32 debug console")
-    if profile.get("videoStrategy") != "deferred-d6":
+    if profile.get("videoStrategy") != "mp4-bridge":
         raise SystemExit("D5 profile lost the mandatory D6 video strategy")
 
     resource_map = json.loads((root / "resource-map.json").read_text(encoding="utf-8"))
@@ -68,7 +70,12 @@ def main() -> None:
             raise SystemExit(f"D5 resource map is missing {package}")
 
     player = (root / "player.js").read_text(encoding="utf-8")
-    for token in ("resolveEngineProfile", "-krkr2web-autopath=", "firstDynamicError"):
+    for relative in ("engine-worker-host.js", "engine-worker.js", "engine/krkrsdl2.js", "engine/krkrsdl2.wasm"):
+        if not (root / relative).is_file():
+            raise SystemExit(f"D5 Dedicated Worker runtime is missing {relative}")
+    for token in ("resolveEngineProfile", "-krkr2web-autopath=", "firstDynamicError",
+                  "directKagApplied", "runtimeVariant", "Krkr2EngineWorkerHost",
+                  "forceTerminate", "workerCapability"):
         if token not in player:
             raise SystemExit(f"D5 player is missing {token}")
     if list(root.rglob("*.xp3")):

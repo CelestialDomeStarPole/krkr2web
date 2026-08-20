@@ -1,26 +1,58 @@
 (function () {
   "use strict";
 
-  var ENGINE_WASM_URL = "/engine/krkrsdl2.wasm";
+  var ENGINE_VARIANTS = {
+    baseline: {
+      id: "baseline",
+      wasmUrl: "/engine/krkrsdl2.wasm",
+      factory: "instantiate_krkrsdl2_module"
+    }
+  };
   var storageBridge = window.krkr2StorageBridge;
+  var nativeAlert = window.alert;
   var preloadPromise = null;
+  var startPromise = null;
+  var stopPromise = null;
+  var restartPromise = null;
+  var stopSerial = 0;
   var wasmBinary = null;
+  var engineVariant = null;
+  var runtimeFallbackReason = null;
   var moduleInstance = null;
   var prepared = null;
   var activeProfile = null;
   var activeGameId = null;
+  var activeTitle = null;
+  var moduleGeneration = 0;
+  var engineSessionActive = false;
+  var restartSerial = 0;
+  var forcedStopCount = 0;
+  var stoppedAt = null;
+  var stopReason = null;
   var ready = false;
   var visible = false;
+  var crashed = false;
   var saveSyncing = false;
+  var saveSyncPromise = null;
+  var saveSyncFrozen = false;
   var saveSyncCount = 0;
+  var fatalMessage = null;
+  var fatalAt = null;
+  var alerts = [];
   var errors = [];
   var engineLog = [];
   var firstDynamicError = null;
-  var assetState = { status: "idle", bytes: 0, error: null };
+  var assetState = { status: "idle", bytes: 0, error: null, variant: null };
   var launchEvidence = null;
+  var pendingAudioContext = null;
+  var activeAudioContext = null;
+  var nativeAudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+  var audioContextBridgeRestore = null;
   var elements = {
     view: document.getElementById("player-view"),
     back: document.getElementById("player-back-button"),
+    restart: document.getElementById("player-restart-button"),
+    stop: document.getElementById("player-stop-button"),
     title: document.getElementById("game-title"),
     status: document.getElementById("player-status"),
     detail: document.getElementById("player-detail"),
@@ -66,11 +98,18 @@
     return args.concat(profile.engineArguments);
   }
 
+  function isDiagnosticNoise(message) {
+    // 引擎侧遥测（Motion NodeTree 的 CREATESITE 计数、KRKR2WEB_* 性能日志）
+    // 走 stderr 输出，属于正常诊断信息而非运行错误。
+    return /^(?:CREATESITE|KRKR2WEB_)/.test(String(message));
+  }
+
   function recordEngineLine(message, isError) {
     var line = String(message);
     engineLog.push((isError ? "stderr: " : "stdout: ") + line);
-    if (engineLog.length > 64) { engineLog.shift(); }
-    if (!firstDynamicError && (isError || /(?:error|exception|abort|cannot|failed|not found)/i.test(line))) {
+    if (engineLog.length > 2000) { engineLog.shift(); }
+    if (!firstDynamicError && !isDiagnosticNoise(line) &&
+        (isError || /(?:error|exception|abort|cannot|failed|not found)/i.test(line))) {
       firstDynamicError = line;
       if (launchEvidence) { launchEvidence.firstDynamicError = line; }
     }
@@ -86,23 +125,81 @@
     elements.view.dataset.state = state || "loading";
   }
 
+  function isFatalAlert(message) {
+    return /(?:致命|エラー|例外|exception|cannot convert|fatal|\berror\b|行\s*:\s*\d+)/i.test(message);
+  }
+
+  function captureAlert(message) {
+    var text = String(message);
+    alerts.push({ message: text, at: new Date().toISOString() });
+    if (alerts.length > 16) { alerts.shift(); }
+    recordEngineLine("Browser alert: " + text, isFatalAlert(text));
+    if ((engineSessionActive || moduleInstance) && isFatalAlert(text)) {
+      crashed = true;
+      ready = false;
+      fatalMessage = text;
+      fatalAt = new Date().toISOString();
+      errors.push("游戏致命错误：" + text);
+      setStatus("游戏发生错误", "可点击上方停止按钮立即终止，或返回游戏库重新启动。", "fail");
+      persistEvidence();
+      notifyState();
+    }
+  }
+
+  window.alert = function (message) {
+    captureAlert(message);
+    return nativeAlert.apply(window, arguments);
+  };
+
+  function threadCapability() {
+    return { supported: false, reason: "retired-dedicated-worker" };
+  }
+
+  function workerCapability() {
+    if (typeof window.Krkr2EngineWorkerHost !== "function" ||
+        typeof window.Krkr2EngineWorkerHost.capability !== "function") {
+      return { supported: false, reason: "worker-host" };
+    }
+    return window.Krkr2EngineWorkerHost.capability();
+  }
+
   function preload() {
     if (assetState.status === "ready" && wasmBinary) { return Promise.resolve(snapshot()); }
     if (preloadPromise) { return preloadPromise; }
-    assetState = { status: "loading", bytes: 0, error: null };
+    assetState = { status: "loading", bytes: 0, error: null, variant: null };
     notifyState();
-    if (launchEvidence) { launchEvidence.networkFetches += 1; }
-    preloadPromise = fetch(ENGINE_WASM_URL, { credentials: "same-origin" }).then(function (response) {
-      if (!response.ok) { throw new Error("HTTP " + response.status); }
-      return response.arrayBuffer();
-    }).then(function (buffer) {
-      if (!buffer.byteLength || !WebAssembly.validate(buffer)) { throw new Error("引擎文件无效"); }
-      wasmBinary = new Uint8Array(buffer);
-      assetState = { status: "ready", bytes: buffer.byteLength, error: null };
-      notifyState();
-      return snapshot();
-    }).catch(function (error) {
-      assetState = { status: "failed", bytes: 0, error: errorText(error) };
+    preloadPromise = (async function () {
+      var capability = workerCapability();
+      var candidates = [ENGINE_VARIANTS.baseline];
+      runtimeFallbackReason = capability.supported ? null : capability.reason;
+      var lastError = null;
+      for (var index = 0; index < candidates.length; index += 1) {
+        var candidate = candidates[index];
+        try {
+          if (launchEvidence) { launchEvidence.networkFetches += 1; }
+          var response = await fetch(candidate.wasmUrl, { credentials: "same-origin" });
+          if (!response.ok) { throw new Error("HTTP " + response.status); }
+          var buffer = await response.arrayBuffer();
+          if (!buffer.byteLength || !WebAssembly.validate(buffer)) { throw new Error("invalid wasm feature set"); }
+          if (!capability.supported && typeof window[candidate.factory] !== "function") {
+            throw new Error("missing module factory");
+          }
+          wasmBinary = new Uint8Array(buffer);
+          engineVariant = capability.supported ? Object.assign({}, candidate, {
+            id: "dedicated-worker-baseline",
+            worker: true
+          }) : candidate;
+          assetState = { status: "ready", bytes: buffer.byteLength, error: null, variant: engineVariant.id };
+          notifyState();
+          return snapshot();
+        } catch (error) {
+          lastError = error;
+          runtimeFallbackReason = "baseline-load: " + errorText(error);
+        }
+      }
+      throw lastError || new Error("No compatible engine variant");
+    }()).catch(function (error) {
+      assetState = { status: "failed", bytes: 0, error: errorText(error), variant: null };
       preloadPromise = null;
       notifyState();
       throw error;
@@ -121,13 +218,26 @@
     });
   }
 
-  function syncSaves() {
-    if (saveSyncing || !moduleInstance || !moduleInstance.FS || typeof moduleInstance.FS.syncfs !== "function") { return Promise.resolve(); }
+  function syncSaves(options) {
+    var force = options && options.force;
+    var instance = moduleInstance;
+    var workerSync = instance && typeof instance.syncSaves === "function";
+    var directSync = instance && instance.FS && typeof instance.FS.syncfs === "function";
+    if ((!force && saveSyncFrozen) || !instance || (!workerSync && !directSync)) {
+      return Promise.resolve({ skipped: true });
+    }
+    if (saveSyncing && saveSyncPromise) { return saveSyncPromise; }
     saveSyncing = true;
     elements.save.textContent = "保存中";
-    return new Promise(function (resolve) {
-      moduleInstance.FS.syncfs(false, function (error) {
+    saveSyncPromise = new Promise(function (resolve) {
+      var settled = false;
+      var timer = setTimeout(function () { finish(new Error("存档同步超时")); }, 8000);
+      function finish(error) {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
         saveSyncing = false;
+        saveSyncPromise = null;
         if (error) {
           errors.push("存档同步失败：" + errorText(error));
           elements.save.textContent = "保存失败";
@@ -136,26 +246,165 @@
           elements.save.textContent = "已保存";
         }
         persistEvidence();
-        resolve();
-      });
+        resolve({ error: error ? errorText(error) : null });
+      }
+      try {
+        if (workerSync) {
+          Promise.resolve(instance.syncSaves()).then(function () { finish(); }, finish);
+        } else {
+          instance.FS.syncfs(false, finish);
+        }
+      } catch (error) { finish(error); }
     });
+    return saveSyncPromise;
+  }
+
+  function audioContextOf(instance) {
+    return (instance && instance.audioContext) ||
+      (instance && instance.SDL2 && instance.SDL2.audioContext) || activeAudioContext;
+  }
+
+  function restoreAudioContextBridge() {
+    if (!audioContextBridgeRestore) { return; }
+    audioContextBridgeRestore();
+    audioContextBridgeRestore = null;
+  }
+
+  function armAudioContextBridge(context) {
+    restoreAudioContextBridge();
+    if (!context || !nativeAudioContextConstructor) { return false; }
+    var previousAudioContext = window.AudioContext;
+    var previousWebkitAudioContext = window.webkitAudioContext;
+    function BridgedAudioContext(options) {
+      if (context.state !== "closed") { return context; }
+      return new nativeAudioContextConstructor(options);
+    }
+    BridgedAudioContext.prototype = nativeAudioContextConstructor.prototype;
+    try { Object.setPrototypeOf(BridgedAudioContext, nativeAudioContextConstructor); } catch (error) {}
+    window.AudioContext = BridgedAudioContext;
+    if (previousWebkitAudioContext) { window.webkitAudioContext = BridgedAudioContext; }
+    audioContextBridgeRestore = function () {
+      if (window.AudioContext === BridgedAudioContext) { window.AudioContext = previousAudioContext; }
+      if (window.webkitAudioContext === BridgedAudioContext) { window.webkitAudioContext = previousWebkitAudioContext; }
+    };
+    return true;
+  }
+
+  function createGestureAudioContext(forceNew) {
+    var current = !forceNew && (pendingAudioContext || audioContextOf(moduleInstance));
+    if (current && current.state !== "closed") {
+      if (current.state === "suspended") { current.resume().catch(function () {}); }
+      return current;
+    }
+    if (!nativeAudioContextConstructor) { return null; }
+    try {
+      current = new nativeAudioContextConstructor();
+      if (current.state === "suspended") { current.resume().catch(function () {}); }
+      return current;
+    } catch (error) {
+      errors.push("音频初始化失败：" + errorText(error));
+      return null;
+    }
+  }
+
+  function closeAudioContext(instance) {
+    var context = audioContextOf(instance);
+    if (context && context.state !== "closed") {
+      try { context.close().catch(function () {}); } catch (error) {}
+    }
+    if (context === activeAudioContext) { activeAudioContext = null; }
+    restoreAudioContextBridge();
+  }
+
+  function usesDirectKag(profile) {
+    return !!(profile && profile.runtimeCompatibility && profile.runtimeCompatibility.directKagScenario);
+  }
+
+  function applyRuntimeCompatibility(instance, generation) {
+    if (!instance || generation !== moduleGeneration || !usesDirectKag(activeProfile) || typeof instance.evalTJS !== "function") {
+      return false;
+    }
+    if (launchEvidence) { launchEvidence.directKagAttempts += 1; }
+    try {
+      var result = instance.evalTJS("(function(){ if(typeof world_object != 'undefined') { world_object.playerExecMode = false; return true; } return false; })()");
+      if (result === true || result === 1) {
+        if (launchEvidence) { launchEvidence.directKagApplied = true; }
+        return true;
+      }
+    } catch (error) {
+      if (launchEvidence) { launchEvidence.directKagLastError = errorText(error); }
+    }
+    return false;
+  }
+
+  function scheduleRuntimeCompatibility(instance, generation) {
+    if (!usesDirectKag(activeProfile)) { return; }
+    var attempts = 0;
+    function attempt() {
+      if (generation !== moduleGeneration || instance !== moduleInstance) { return; }
+      attempts += 1;
+      if (!applyRuntimeCompatibility(instance, generation) && attempts < 240) {
+        setTimeout(attempt, 250);
+      } else {
+        persistEvidence();
+      }
+    }
+    setTimeout(attempt, 0);
+  }
+
+  function installCanvasCompatibilityBridge(canvas) {
+    function apply() { applyRuntimeCompatibility(moduleInstance, moduleGeneration); }
+    canvas.addEventListener("pointerdown", apply, true);
+    canvas.addEventListener("touchstart", apply, { capture: true, passive: true });
+    canvas.addEventListener("mousedown", apply, true);
+  }
+
+  function replaceCanvas() {
+    var replacement = elements.canvas.cloneNode(false);
+    elements.canvas.parentNode.replaceChild(replacement, elements.canvas);
+    elements.canvas = replacement;
+    installCanvasCompatibilityBridge(replacement);
   }
 
   function snapshot() {
+    var audioContext = audioContextOf(moduleInstance);
     return {
       assets: Object.assign({}, assetState),
       gameId: activeGameId,
       contentVersion: prepared && prepared.version,
       engineProfile: activeProfile && activeProfile.id,
+      runtimeVariant: engineVariant && engineVariant.id,
+      runtimeFallbackReason: runtimeFallbackReason,
+      threadCapability: threadCapability(),
+      workerCapability: workerCapability(),
+      generation: moduleGeneration,
+      running: engineSessionActive || !!moduleInstance,
       ready: ready,
       visible: visible,
+      crashed: crashed,
+      fatalMessage: fatalMessage,
+      fatalAt: fatalAt,
+      restarting: !!restartPromise,
+      stopping: !!stopPromise,
+      forcedStopCount: forcedStopCount,
+      stoppedAt: stoppedAt,
+      stopReason: stopReason,
       href: location.href,
-      storage: storageBridge.snapshot(),
+      storage: moduleInstance && moduleInstance.storageSnapshot || storageBridge.snapshot(),
+      workerRuntime: moduleInstance && typeof moduleInstance.snapshot === "function" ? moduleInstance.snapshot() : null,
       wasmMemoryBytes: moduleInstance && moduleInstance.HEAPU8 ? moduleInstance.HEAPU8.buffer.byteLength : null,
+      audio: {
+        supported: !!nativeAudioContextConstructor,
+        active: !!audioContext,
+        state: audioContext ? audioContext.state : null,
+        sampleRate: audioContext ? audioContext.sampleRate : null,
+        bridgeArmed: !!audioContextBridgeRestore
+      },
       saveSyncCount: saveSyncCount,
       launch: launchEvidence && Object.assign({}, launchEvidence),
-      errors: errors.slice(-16),
-      engineLog: engineLog.slice(-64),
+      alerts: alerts.slice(-16),
+      errors: errors.slice(-24),
+      engineLog: engineLog.slice(-2000),
       firstDynamicError: firstDynamicError,
       canvas: { width: elements.canvas.width, height: elements.canvas.height, clientWidth: elements.canvas.clientWidth, clientHeight: elements.canvas.clientHeight }
     };
@@ -176,7 +425,7 @@
     visible = true;
     elements.view.hidden = false;
     elements.view.setAttribute("aria-hidden", "false");
-    var audioContext = moduleInstance && moduleInstance.SDL2 && moduleInstance.SDL2.audioContext;
+    var audioContext = pendingAudioContext || audioContextOf(moduleInstance);
     if (audioContext && audioContext.state === "suspended") { audioContext.resume().catch(function () {}); }
     requestWakeLock();
     notifyState();
@@ -186,43 +435,257 @@
     visible = false;
     elements.view.hidden = true;
     elements.view.setAttribute("aria-hidden", "true");
-    var audioContext = moduleInstance && moduleInstance.SDL2 && moduleInstance.SDL2.audioContext;
+    var audioContext = audioContextOf(moduleInstance);
     if (audioContext && audioContext.state === "running") { audioContext.suspend().catch(function () {}); }
     syncSaves();
     notifyState();
   }
 
-  async function start(gameId, title) {
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameId)) { throw new Error("游戏标识无效"); }
-    if (moduleInstance) {
-      if (activeGameId !== gameId) { throw new Error("请重新打开页面后再切换另一款游戏"); }
-      show();
-      return snapshot();
+  function terminateInstance(instance, reason, forced) {
+    try {
+      // preserve the frozen-session tail across restarts so a post-freeze
+      // relaunch cannot overwrite the evidence in the engineLog ring buffer
+      localStorage.setItem("krkr2web-d4-last-session", JSON.stringify({
+        stoppedAt: new Date().toISOString(),
+        stopReason: reason || "stop",
+        crashed: crashed,
+        stalledAt: engineStallSince,
+        stallSilentMs: engineStallSilentMs,
+        lastLog: engineLog.slice(-40)
+      }));
+    } catch (error) {}
+    saveSyncFrozen = true;
+    engineSessionActive = false;
+    moduleGeneration += 1;
+    engineHeartbeatAt = 0;
+    engineStallSince = null;
+    try {
+      if (instance && typeof instance.forceTerminate === "function") {
+        instance.forceTerminate();
+      }
+    } catch (error) {
+      errors.push("取消引擎主循环失败：" + errorText(error));
     }
+    try {
+      if (instance && instance.IDBFS && typeof instance.IDBFS.quit === "function") { instance.IDBFS.quit(); }
+    } catch (error) {}
+    closeAudioContext(instance);
+    window.krkr2webVideoStop();
+    if (storageBridge.releaseAll) { storageBridge.releaseAll(); }
+    if (moduleInstance === instance) { moduleInstance = null; }
+    window.Module = null;
+    ready = false;
+    crashed = false;
+    fatalMessage = null;
+    fatalAt = null;
+    stoppedAt = new Date().toISOString();
+    stopReason = reason || "stop";
+    if (forced) { forcedStopCount += 1; }
+    if (instance && instance.replacementCanvas) {
+      if (elements.canvas !== instance.replacementCanvas) {
+        elements.canvas = instance.replacementCanvas;
+        installCanvasCompatibilityBridge(elements.canvas);
+      }
+    } else {
+      replaceCanvas();
+    }
+  }
 
+  async function stop(options) {
+    if (stopPromise) { return stopPromise; }
+    var shouldSync = !options || options.sync !== false;
+    var requestSerial = ++stopSerial;
+    stopPromise = (async function () {
+      setStatus("正在停止引擎", "正在保存本机进度，页面地址不会改变", "loading");
+      notifyState();
+      var pendingStart = startPromise;
+      if (pendingStart) {
+        try { await pendingStart; } catch (error) {}
+      }
+      var instance = moduleInstance;
+      if (!instance) {
+        engineSessionActive = false;
+        return snapshot();
+      }
+      if (shouldSync && !crashed) { await syncSaves({ force: true }); }
+      if (requestSerial !== stopSerial) { return snapshot(); }
+      terminateInstance(instance, options && options.reason || "stop", false);
+      setStatus("引擎已停止", "可以返回游戏库或重新启动", "fail");
+      persistEvidence();
+      notifyState();
+      return snapshot();
+    }());
+    return stopPromise.then(function (value) {
+      stopPromise = null;
+      return value;
+    }, function (error) {
+      stopPromise = null;
+      throw error;
+    });
+  }
+
+  function forceStop(reason) {
+    stopSerial += 1;
+    restartSerial += 1;
+    restartPromise = null;
+    stopPromise = null;
+    setStatus("正在强制终止", "不会等待游戏脚本或存档同步", "loading");
+    var instance = moduleInstance;
+    terminateInstance(instance, reason || "user-force-stop", true);
+    setStatus("游戏已强制终止", "尚未同步的进度可能丢失", "fail");
+    persistEvidence();
+    notifyState();
+    return Promise.resolve(snapshot());
+  }
+
+  async function startFresh(gameId, title, audioContext) {
+    engineSessionActive = true;
+    activeAudioContext = audioContext || null;
+    var audioBridgeArmed = armAudioContextBridge(activeAudioContext);
     show();
     elements.title.textContent = title || gameId;
     setStatus("正在准备引擎", "本次启动不会改变页面地址", "loading");
+    var generation = moduleGeneration + 1;
+    moduleGeneration = generation;
+    ready = false;
+    crashed = false;
+    fatalMessage = null;
+    fatalAt = null;
+    saveSyncFrozen = false;
+    firstDynamicError = null;
     try {
       launchEvidence = {
         requestedAt: new Date().toISOString(),
         href: location.href,
         online: navigator.onLine,
+        generation: generation,
         assetsReadyBeforeStart: assetState.status === "ready" && !!wasmBinary,
-        networkFetches: 0
+        networkFetches: 0,
+        audioContextCreatedFromLaunch: !!audioContext,
+        audioContextBridgeArmed: audioBridgeArmed,
+        runtimeVariant: engineVariant && engineVariant.id,
+        runtimeFallbackReason: runtimeFallbackReason,
+        directKagAttempts: 0,
+        directKagApplied: false
       };
       if (assetState.status !== "ready" || !wasmBinary) { await preload(); }
+      launchEvidence.runtimeVariant = engineVariant && engineVariant.id;
+      launchEvidence.runtimeFallbackReason = runtimeFallbackReason;
       prepared = await storageBridge.prepare(gameId);
       activeGameId = gameId;
-      elements.title.textContent = prepared.manifest.title;
+      activeTitle = prepared.manifest.title || title || gameId;
+      elements.title.textContent = activeTitle;
       activeProfile = resolveEngineProfile(prepared.manifest);
+      // game-native render resolution: the canvas is stretched to the player
+      // stage by CSS, so rendering at the game's native 720p cuts per-frame
+      // pixel work ~2.25x versus full-screen composition on 1080p-class
+      // devices while matching the game's own output size
+      if (activeProfile.display && activeProfile.display.mode === "720p") {
+        elements.canvas.width = 1280;
+        elements.canvas.height = 720;
+      }
       launchEvidence.engineProfile = activeProfile.id;
       launchEvidence.mountedPackages = activeProfile.requiredPackages.slice();
       launchEvidence.autoPaths = activeProfile.autoPathPackages.slice();
       launchEvidence.plugins = Object.assign({}, activeProfile.plugins);
       launchEvidence.videoStrategy = activeProfile.videoStrategy;
       launchEvidence.firstDynamicError = null;
-      setStatus("正在载入游戏", "从本机读取 " + prepared.manifest.title, "loading");
+      setStatus("正在载入游戏", "从本机读取 " + activeTitle, "loading");
+      if (engineVariant && engineVariant.worker) {
+        var host = new window.Krkr2EngineWorkerHost({
+          canvas: elements.canvas,
+          audioContext: audioContext,
+          onCanvasReplaced: function (detail) {
+            if (!detail || !detail.canvas) { return; }
+            elements.canvas = detail.canvas;
+            installCanvasCompatibilityBridge(elements.canvas);
+          },
+          onStdout: function (message) {
+            if (generation !== moduleGeneration) { return; }
+            recordEngineLine(message, false);
+            if (String(message).indexOf("Startup script ended.") !== -1 ||
+                String(message).indexOf("KRKR2WEB_D3_INTERACTIVE_READY") !== -1) {
+              ready = true;
+              setStatus("游戏已启动", "", "ready");
+              persistEvidence();
+            }
+          },
+          onStderr: function (message) {
+            if (generation !== moduleGeneration) { return; }
+            recordEngineLine(message, true);
+            if (isDiagnosticNoise(message)) { return; }
+            errors.push(String(message));
+            persistEvidence();
+          },
+          onInteractiveReady: function () {
+            if (generation !== moduleGeneration) { return; }
+            ready = true;
+            setStatus("游戏已启动", "", "ready");
+            persistEvidence();
+            notifyState();
+          },
+          onHeartbeat: function () {
+            if (generation === moduleGeneration) { window.krkr2webEngineHeartbeat(); }
+          },
+          onSavesReady: function () {
+            if (generation === moduleGeneration) { elements.save.textContent = "存档已读取"; }
+          },
+          onFatal: function (detail) {
+            if (generation !== moduleGeneration) { return; }
+            var reason = detail && detail.error ? errorText(detail.error) : "Worker engine failed";
+            crashed = true;
+            ready = false;
+            recordEngineLine("Worker fatal: " + reason, true);
+            errors.push("Worker fatal: " + reason);
+            setStatus("引擎已停止", reason, "fail");
+            persistEvidence();
+            notifyState();
+          },
+          onExit: function (message) {
+            if (generation !== moduleGeneration) { return; }
+            ready = false;
+            if (Number(message && message.status || 0) !== 0) { crashed = true; }
+            persistEvidence();
+            notifyState();
+          },
+          onEngineQuit: function () {
+            if (generation === moduleGeneration) { window.krkr2webEngineQuit(); }
+          }
+        });
+        moduleInstance = host;
+        window.Module = host;
+        notifyState();
+        await host.start({
+          gameId: gameId,
+          arguments: engineArguments(activeProfile, gameId),
+          workerUrl: "/engine-worker.js",
+          engineScriptUrl: "/engine/krkrsdl2.js",
+          wasmUrl: engineVariant.wasmUrl,
+          storageScriptUrl: "/play/storage.js",
+          factoryName: engineVariant.factory,
+          wasmBinary: wasmBinary,
+          audioContext: audioContext,
+          width: elements.canvas.width,
+          height: elements.canvas.height,
+          startTimeoutMs: 120000
+        });
+        if (generation !== moduleGeneration) {
+          host.forceTerminate("superseded-start");
+          return snapshot();
+        }
+        pendingAudioContext = null;
+        if (activeProfile.allowStartupTimeoutReady) {
+          setTimeout(function () {
+            if (generation === moduleGeneration && !ready) {
+              ready = true;
+              setStatus("游戏已启动", "", "ready");
+              persistEvidence();
+            }
+          }, 1500);
+        }
+        notifyState();
+        return snapshot();
+      }
       var moduleOptions = {
         arguments: engineArguments(activeProfile, gameId),
         canvas: elements.canvas,
@@ -232,7 +695,7 @@
         preRun: [function () {
           moduleOptions.addRunDependency("krkr2web-product-saves");
           mountSaves(moduleOptions, gameId).then(function () {
-            elements.save.textContent = "存档已读取";
+            if (generation === moduleGeneration) { elements.save.textContent = "存档已读取"; }
             moduleOptions.removeRunDependency("krkr2web-product-saves");
           }, function (error) {
             errors.push("存档读取失败：" + errorText(error));
@@ -240,6 +703,7 @@
           });
         }],
         print: function (message) {
+          if (generation !== moduleGeneration) { return; }
           recordEngineLine(message, false);
           if (String(message).indexOf("Startup script ended.") !== -1 || String(message).indexOf("KRKR2WEB_D3_INTERACTIVE_READY") !== -1) {
             ready = true;
@@ -248,42 +712,339 @@
           }
         },
         printErr: function (message) {
+          if (generation !== moduleGeneration) { return; }
           recordEngineLine(message, true);
+          if (isDiagnosticNoise(message)) { return; }
           errors.push(String(message));
           persistEvidence();
         },
-        onRuntimeInitialized: function () { setStatus("正在执行游戏脚本", "请稍候", "loading"); },
+        onRuntimeInitialized: function () {
+          if (generation === moduleGeneration) { setStatus("正在执行游戏脚本", "请稍候", "loading"); }
+        },
         onAbort: function (reason) {
+          if (generation !== moduleGeneration) { return; }
+          crashed = true;
+          ready = false;
           recordEngineLine("Wasm abort: " + String(reason), true);
           errors.push("Wasm abort: " + String(reason));
           setStatus("引擎已停止", String(reason), "fail");
           persistEvidence();
+          notifyState();
+        },
+        onExit: function (status) {
+          if (generation !== moduleGeneration) { return; }
+          ready = false;
+          if (status !== 0) {
+            crashed = true;
+            setStatus("引擎已停止", "退出状态：" + status, "fail");
+          }
+          persistEvidence();
+          notifyState();
         }
       };
+      if (audioContext) { moduleOptions.SDL2 = { audioContext: audioContext }; }
       window.Module = moduleOptions;
-      moduleInstance = await window.instantiate_krkrsdl2_module(moduleOptions);
-      wasmBinary = null;
+      var factory = engineVariant && window[engineVariant.factory];
+      if (typeof factory !== "function") { throw new Error("Selected engine factory is unavailable"); }
+      var instance = await factory(moduleOptions);
+      if (generation !== moduleGeneration) {
+        try {
+          if (typeof instance.forceTerminate === "function") {
+            instance.forceTerminate();
+          }
+        } catch (error) {}
+        return snapshot();
+      }
+      moduleInstance = instance;
+      pendingAudioContext = null;
+      scheduleRuntimeCompatibility(moduleInstance, generation);
       if (activeProfile.allowStartupTimeoutReady) {
         setTimeout(function () {
-          if (!ready) { ready = true; setStatus("游戏已启动", "", "ready"); persistEvidence(); }
+          if (generation === moduleGeneration && !ready) {
+            ready = true;
+            setStatus("游戏已启动", "", "ready");
+            persistEvidence();
+          }
         }, 1500);
       }
+      notifyState();
       return snapshot();
     } catch (error) {
+      pendingAudioContext = null;
+      if (generation !== moduleGeneration) { return snapshot(); }
+      engineSessionActive = false;
+      crashed = true;
+      if (engineVariant && engineVariant.worker && moduleInstance) {
+        try { moduleInstance.forceTerminate("startup-failed"); } catch (ignored) {}
+        moduleInstance = null;
+        window.Module = null;
+      }
+      closeAudioContext(moduleInstance);
       errors.push(errorText(error));
       setStatus("无法启动游戏", errorText(error), "fail");
       persistEvidence();
+      notifyState();
       throw error;
     }
   }
 
+  function start(gameId, title) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameId)) { return Promise.reject(new Error("游戏标识无效")); }
+    var audioContext = createGestureAudioContext(false);
+    if (moduleInstance) {
+      if (activeGameId !== gameId) { return Promise.reject(new Error("请先强制停止当前游戏，再切换另一款游戏")); }
+      if (crashed) { return restart(gameId, title, createGestureAudioContext(true)); }
+      show();
+      return Promise.resolve(snapshot());
+    }
+    if (startPromise) { return startPromise; }
+    pendingAudioContext = audioContext;
+    startPromise = startFresh(gameId, title, audioContext);
+    return startPromise.then(function (value) {
+      startPromise = null;
+      return value;
+    }, function (error) {
+      startPromise = null;
+      throw error;
+    });
+  }
+
+  function restart(gameId, title, primedContext) {
+    var targetGameId = gameId || activeGameId;
+    var targetTitle = title || activeTitle || targetGameId;
+    if (!targetGameId) { return Promise.reject(new Error("没有可重启的游戏")); }
+    if (restartPromise) { return restartPromise; }
+    var requestSerial = ++restartSerial;
+    var audioContext = primedContext || createGestureAudioContext(true);
+    pendingAudioContext = audioContext;
+    restartPromise = (async function () {
+      await stop({ sync: !crashed, reason: "restart" });
+      if (requestSerial !== restartSerial) { throw new Error("重启已被强制终止取消"); }
+      pendingAudioContext = audioContext;
+      return startFresh(targetGameId, targetTitle, audioContext);
+    }());
+    return restartPromise.then(function (value) {
+      restartPromise = null;
+      notifyState();
+      return value;
+    }, function (error) {
+      restartPromise = null;
+      notifyState();
+      throw error;
+    });
+  }
+
+  installCanvasCompatibilityBridge(elements.canvas);
   elements.back.addEventListener("click", hide);
+  elements.restart.addEventListener("click", function () {
+    restart().catch(function (error) { setStatus("无法重启游戏", errorText(error), "fail"); });
+  });
+  elements.stop.addEventListener("click", function () {
+    forceStop("player-toolbar").then(hide);
+  });
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") { syncSaves(); } else if (visible) { requestWakeLock(); }
   });
   window.addEventListener("pagehide", function () { syncSaves(); persistEvidence(); });
   setInterval(syncSaves, 30000);
+  var engineHeartbeatAt = 0;
+  var engineStallSince = null;
+  var engineStallSilentMs = 0;
+  var stallToastTimer = 0;
+  function showStallToast(text, sticky) {
+    var toast = document.getElementById("toast");
+    if (!toast) { return; }
+    toast.textContent = text;
+    toast.hidden = false;
+    if (stallToastTimer) { clearTimeout(stallToastTimer); }
+    // A stalled-looking engine is usually suspended in an Asyncify load
+    // burst; the notice must never cover or block the game canvas, because
+    // in-game dialogs still need touch input the moment the engine resumes.
+    if (!sticky) { stallToastTimer = setTimeout(function () { toast.hidden = true; }, 6000); }
+  }
+  function hideStallToast() {
+    var toast = document.getElementById("toast");
+    if (toast) { toast.hidden = true; }
+    if (stallToastTimer) { clearTimeout(stallToastTimer); stallToastTimer = 0; }
+  }
+  window.krkr2webEngineHeartbeat = function () { engineHeartbeatAt = Date.now(); };
+  window.krkr2webEngineQuit = function () {
+    // the engine terminated itself (game exit / System shutdown): stop the
+    // session cleanly instead of letting the watchdog flag it as stalled
+    if (!engineSessionActive) { return; }
+    errors.push("KRKR2WEB_ENGINE_QUIT 引擎正常退出");
+    stop({ sync: true, reason: "engine-quit" }).then(function () { hide(); }, function () { hide(); });
+  };
+  setInterval(function () {
+    if (!engineSessionActive || document.visibilityState !== "visible") { engineStallSince = null; return; }
+    var silentMs = Date.now() - engineHeartbeatAt;
+    if (engineHeartbeatAt > 0 && silentMs > 40000) {
+      if (!engineStallSince) {
+        engineStallSince = new Date().toISOString();
+        engineStallSilentMs = silentMs;
+        // this timer firing proves the JS event loop is alive: the engine is
+        // suspended between frames (Asyncify await) rather than the main
+        // thread being blocked by a synchronous engine task.
+        var pendingOp = null;
+        try { pendingOp = window.krkr2webAsyncTrace || window.krkr2webStorageTrace || null; } catch (error) {}
+        var pendingText = "";
+        if (pendingOp) {
+          pendingText = "；挂起操作: " + pendingOp.op + " " + pendingOp.detail +
+            " 已 " + Math.round((Date.now() - pendingOp.startedAt) / 1000) + " 秒";
+        }
+        errors.push("KRKR2WEB_D5_STALL 引擎主循环停跳 " + Math.round(silentMs / 1000) + " 秒（页面可见，JS 事件循环存活 → 引擎挂起等待中" + pendingText + "）");
+        setStatus("游戏运行中（加载停顿）", "主循环已停跳 " + Math.round(silentMs / 1000) + " 秒，多为场景加载；游戏画面仍可点击", "ready");
+        showStallToast("引擎停跳 " + Math.round(silentMs / 1000) + " 秒（加载中）。若长时间无响应可点右上角 ■ 强制终止。", true);
+        notifyState();
+        persistEvidence();
+      }
+    } else if (engineStallSince && silentMs < 3000) {
+      engineStallSince = null;
+      errors.push("KRKR2WEB_D5_STALL 引擎主循环已恢复（此前停跳约 " + Math.round(engineStallSilentMs / 1000) + " 秒）");
+      if (!crashed && ready) { setStatus("游戏已启动", "", "ready"); }
+      showStallToast("引擎已恢复（此前停跳约 " + Math.round(engineStallSilentMs / 1000) + " 秒）", false);
+      notifyState();
+    }
+  }, 2000);
 
-  window.krkr2Player = { preload: preload, start: start, show: show, hide: hide, syncSaves: syncSaves, snapshot: snapshot };
+  // Generic KRKR video bridge: prefer hardware-decoded H.264/AAC MP4. Keep
+  // WebM as a migration fallback for transcodes created by older builds.
+  var videoElement = null;
+  var videoName = null;
+  var videoFailed = false;
+  var videoEndedNotified = false;
+  function webVideoSources(name) {
+    if (!activeGameId || !name) { return null; }
+    var stem = name.split("?")[0];
+    var slash = stem.lastIndexOf("/");
+    if (slash >= 0) { stem = stem.slice(slash + 1); }
+    var dot = stem.lastIndexOf(".");
+    if (dot > 0) { stem = stem.slice(0, dot); }
+    if (!/^[A-Za-z0-9_().-]+$/.test(stem)) { return null; }
+    var base = "/videos/" + activeGameId + "/" + encodeURIComponent(stem);
+    return [
+      { url: base + ".mp4", type: "video/mp4" },
+      { url: base + ".webm", type: "video/webm" }
+    ];
+  }
+  function webVideoBounds() {
+    if (!videoElement) { return; }
+    var rect = elements.canvas.getBoundingClientRect();
+    videoElement.style.left = rect.left + "px";
+    videoElement.style.top = rect.top + "px";
+    videoElement.style.width = rect.width + "px";
+    videoElement.style.height = rect.height + "px";
+  }
+  function webVideoErrorDetail(error) {
+    var mediaError = videoElement && videoElement.error;
+    return "name=" + (error && error.name ? error.name : "") +
+      " message=" + errorText(error || "") +
+      " mediaCode=" + (mediaError ? mediaError.code : 0) +
+      " networkState=" + (videoElement ? videoElement.networkState : -1) +
+      " readyState=" + (videoElement ? videoElement.readyState : -1);
+  }
+  function webVideoEnded(reason) {
+    if (videoElement) { videoElement.style.display = "none"; videoElement.pause(); }
+    if (videoEndedNotified) { return; }
+    videoEndedNotified = true;
+    recordEngineLine("KRKR2WEB_VIDEO_END reason=" + (reason || "ended") + " name=" + String(videoName || ""), false);
+    try {
+      if (moduleInstance && typeof moduleInstance.krkr2webVideoEnded === "function") {
+        moduleInstance.krkr2webVideoEnded();
+      }
+    } catch (error) { errors.push("视频结束回调失败：" + errorText(error)); }
+  }
+  window.krkr2webVideoOpen = function (name) {
+    videoName = name;
+    videoFailed = false;
+    videoEndedNotified = false;
+    recordEngineLine("KRKR2WEB_VIDEO_OPEN name=" + String(name || ""), false);
+  };
+  window.krkr2webVideoPlay = function () {
+    var sources = webVideoSources(videoName);
+    var primaryUrl = sources && sources.length ? sources[0].url : "";
+    recordEngineLine("KRKR2WEB_VIDEO_PLAY name=" + String(videoName || "") +
+      " sources=" + (sources ? sources.map(function (source) { return source.url; }).join(",") : ""), false);
+    if (!sources) { webVideoEnded("invalid-name"); return; }
+    if (!videoElement) {
+      videoElement = document.createElement("video");
+      videoElement.setAttribute("playsinline", "playsinline");
+      videoElement.setAttribute("webkit-playsinline", "webkit-playsinline");
+      videoElement.preload = "auto";
+      videoElement.style.position = "absolute";
+      videoElement.style.objectFit = "contain";
+      videoElement.style.background = "#000";
+      videoElement.style.zIndex = "40";
+      // clicks must reach the canvas so the game's own skip handling works
+      videoElement.style.pointerEvents = "none";
+      videoElement.style.display = "none";
+      videoElement.addEventListener("ended", function () { webVideoEnded("ended"); });
+      videoElement.addEventListener("error", function (event) {
+        videoFailed = true;
+        recordEngineLine("KRKR2WEB_VIDEO_ERROR url=" + String(videoElement.currentSrc || videoElement.src || "") +
+          " " + webVideoErrorDetail(event), true);
+        webVideoEnded("media-error");
+      });
+      elements.view.appendChild(videoElement);
+      window.addEventListener("resize", webVideoBounds);
+    }
+    webVideoBounds();
+    videoElement.loop = false;
+    videoElement.muted = false;
+    videoElement.removeAttribute("src");
+    while (videoElement.firstChild) { videoElement.removeChild(videoElement.firstChild); }
+    sources.forEach(function (candidate) {
+      var source = document.createElement("source");
+      source.src = candidate.url;
+      source.type = candidate.type;
+      videoElement.appendChild(source);
+    });
+    videoElement.load();
+    videoElement.style.display = "block";
+    videoElement.play().then(function () {
+      recordEngineLine("KRKR2WEB_VIDEO_STARTED mode=audio url=" +
+        String(videoElement.currentSrc || primaryUrl), false);
+    }).catch(function (error) {
+      recordEngineLine("KRKR2WEB_VIDEO_PLAY_REJECTED url=" +
+        String(videoElement.currentSrc || primaryUrl) + " " + webVideoErrorDetail(error), true);
+      if (!videoFailed && error && error.name === "NotAllowedError") {
+        // Some Android WebViews lose transient user activation while the
+        // engine boots. Preserve the OP/ED visuals instead of skipping them.
+        videoElement.muted = true;
+        videoElement.play().then(function () {
+          recordEngineLine("KRKR2WEB_VIDEO_STARTED mode=muted-autoplay-fallback url=" +
+            String(videoElement.currentSrc || primaryUrl), false);
+        }).catch(function (fallbackError) {
+          videoFailed = true;
+          recordEngineLine("KRKR2WEB_VIDEO_FALLBACK_FAILED url=" + url + " " +
+            webVideoErrorDetail(fallbackError), true);
+          webVideoEnded("play-failed");
+        });
+        return;
+      }
+      if (!videoFailed) { videoFailed = true; }
+      webVideoEnded("play-failed");
+    });
+  };
+  window.krkr2webVideoStop = function () {
+    recordEngineLine("KRKR2WEB_VIDEO_STOP name=" + String(videoName || ""), false);
+    if (videoElement) { videoElement.style.display = "none"; videoElement.pause(); }
+  };
+  window.krkr2webVideoPause = function (pause) {
+    if (!videoElement) { return; }
+    if (pause) { videoElement.pause(); } else { videoElement.play().catch(function () {}); }
+  };
+
+  window.krkr2Player = {
+    preload: preload,
+    start: start,
+    restart: restart,
+    stop: stop,
+    forceStop: forceStop,
+    show: show,
+    hide: hide,
+    syncSaves: syncSaves,
+    snapshot: snapshot
+  };
   window.d4PlayerState = snapshot;
 }());
