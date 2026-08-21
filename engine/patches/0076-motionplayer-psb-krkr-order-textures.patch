@@ -1,0 +1,101 @@
+# krkr2web: PSB texture payloads (pixel chunks, palettes and the win-source
+# RGBA8 stream) are stored krkr-order BGRA - uint32 0xAARRGGBB, byte sequence
+# B,G,R,A. Verified against m2logo.mtn src/logo/icon35: the palette chunk is
+# 28 28 d2 ff ... (blue C = R 0xD2 in the high byte). The upstream
+# kirikiroid2 call chain reverses them to RGBA byte order because its
+# TVPTextureFormat::RGBA textures are GL RGBA/UNSIGNED_BYTE (R at the low
+# address). The web software texture (WebMotionTexture) instead stores and
+# reads uint32 values verbatim with krkr semantics, so the reversal swaps R/B
+# twice-removed: every PSB-sourced motion texture rendered with red and blue
+# exchanged (the m2logo C appears blue). Drop the reversals so the PSB bytes
+# flow into the texture unchanged; layer-side paths already speak krkr order.
+diff --git a/external/krkrz/plugin/motionplayer/SourceCache.cpp b/external/krkrz/plugin/motionplayer/SourceCache.cpp
+--- a/external/krkrz/plugin/motionplayer/SourceCache.cpp
++++ b/external/krkrz/plugin/motionplayer/SourceCache.cpp
+@@ -429,10 +429,6 @@ namespace motion {
+             } else {
+                 decodeObjSourceRL32_guess(
+                     decoded, pixelData, resourceSize);
+-                TVPReverseRGB(
+-                    reinterpret_cast<tjs_uint32 *>(decoded),
+-                    reinterpret_cast<const tjs_uint32 *>(decoded),
+-                    static_cast<tjs_int>(pixelCount));
+             }
+             sourcePixels = decoded;
+         } else {
+@@ -454,10 +450,8 @@ namespace motion {
+                 static_cast<tjs_int>(sizeof(tjs_uint32));
+             std::vector<tjs_uint32> palette(
+                 static_cast<std::size_t>(paletteCount));
+-            TVPReverseRGB(
+-                palette.data(),
+-                reinterpret_cast<const tjs_uint32 *>(paletteData),
+-                paletteCount);
++            std::memcpy(palette.data(), paletteData,
++                        static_cast<std::size_t>(paletteCount) * 4u);
+             bgra = static_cast<std::uint8_t *>(
+                 TJSAlignedAlloc(4u * pixelCount, 4));
+             TVPBLExpand8BitTo32BitPal(
+@@ -471,10 +465,8 @@ namespace motion {
+         } else {
+             bgra = static_cast<std::uint8_t *>(
+                 TJSAlignedAlloc(4u * pixelCount, 4));
+-            TVPReverseRGB(
+-                reinterpret_cast<tjs_uint32 *>(bgra),
+-                reinterpret_cast<const tjs_uint32 *>(pixelData),
+-                static_cast<tjs_int>(pixelCount));
++            std::memcpy(bgra, pixelData,
++                        static_cast<std::size_t>(pixelCount) * 4u);
+         }
+ 
+         _bitmap = new tTVPBaseBitmap(
+
+diff --git a/external/krkrz/plugin/motionplayer/PlayerResource.cpp b/external/krkrz/plugin/motionplayer/PlayerResource.cpp
+--- a/external/krkrz/plugin/motionplayer/PlayerResource.cpp
++++ b/external/krkrz/plugin/motionplayer/PlayerResource.cpp
+@@ -95,10 +95,8 @@ namespace motion {
+                 TJS::TJSAlignedAlloc(destinationSize, 4));
+             const tjs_int signedSourceSize = signedW32(sourceSize);
+             if(std::strcmp(type, "RGBA8") == 0) {
+-                TVPReverseRGB(
+-                    reinterpret_cast<tjs_uint32 *>(bgra),
+-                    reinterpret_cast<const tjs_uint32 *>(sourcePixels),
+-                    signedSourceSize / 4);
++                std::memcpy(bgra, sourcePixels,
++                            static_cast<std::size_t>(signedSourceSize));
+             } else {
+                 if(std::strcmp(type, "A8L8") != 0) {
+                     // Free before constructing the unsupported-format
+@@ -311,10 +309,8 @@ namespace motion {
+                         signedW32(resourceSize) / 4;
+                     std::vector<tjs_uint32> palette(
+                         static_cast<std::size_t>(paletteCount));
+-                    TVPReverseRGB(
+-                        palette.data(),
+-                        reinterpret_cast<const tjs_uint32 *>(paletteData),
+-                        paletteCount);
++                    std::memcpy(palette.data(), paletteData,
++                                static_cast<std::size_t>(paletteCount) * 4u);
+                     TVPBLExpand8BitTo32BitPal(
+                         reinterpret_cast<tjs_uint32 *>(rect.bgra), indexes,
+                         pixelCountS32, palette.data());
+@@ -330,18 +326,12 @@ namespace motion {
+                             .GetResource(resourceSize);
+                     decodePsbRL32_guess(
+                         rect.bgra, pixelData, resourceSize);
+-                    TVPReverseRGB(
+-                        reinterpret_cast<tjs_uint32 *>(rect.bgra),
+-                        reinterpret_cast<const tjs_uint32 *>(rect.bgra),
+-                        pixelCountS32);
+                 } else {
+                     const std::uint8_t *pixelData =
+                         persistentNode.GetDictionaryValueStrict("pixel")
+                             .GetResource(resourceSize);
+-                    TVPReverseRGB(
+-                        reinterpret_cast<tjs_uint32 *>(rect.bgra),
+-                        reinterpret_cast<const tjs_uint32 *>(pixelData),
+-                        pixelCountS32);
++                    std::memcpy(rect.bgra, pixelData,
++                                static_cast<std::size_t>(pixelCountS32) * 4u);
+                 }
+             }
