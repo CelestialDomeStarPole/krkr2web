@@ -99,31 +99,6 @@ diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
  	window_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
  #endif
  	new_window_w = 0;
-@@ -2706,6 +2710,15 @@ bool TVPWindowWindow::window_receive_event_input(const SDL_Event &event)
- 					TVPPostInputEvent(new tTVPOnMouseWheelInputEvent(this->TJSNativeInstance, event.wheel.x, event.wheel.y, this->lastMouseX, this->lastMouseY));
- 					return true;
- 				}
-+#ifdef __EMSCRIPTEN__
-+				case SDL_FINGERMOTION:
-+				case SDL_FINGERDOWN:
-+				case SDL_FINGERUP:
-+				{
-+					// SDL already emits logical-coordinate mouse events for each touch.
-+					// Dropping the normalized duplicate avoids double activation.
-+					return false;
-+				}
-+#else
- 				case SDL_FINGERMOTION:
- 				{
- 					TVPPostInputEvent(new tTVPOnTouchMoveInputEvent(this->TJSNativeInstance, event.tfinger.x, event.tfinger.y, 1, 1, event.tfinger.fingerId));
-@@ -2724,6 +2737,7 @@ bool TVPWindowWindow::window_receive_event_input(const SDL_Event &event)
- 					}
- 					return true;
- 				}
-+#endif
- 				case SDL_MULTIGESTURE:
- 				{
- 					TVPPostInputEvent(new tTVPOnTouchScalingInputEvent(this->TJSNativeInstance, 0, event.mgesture.dDist, event.mgesture.x, event.mgesture.y, 0));
 diff --git a/external/krkrz/base/KAGParser.cpp b/external/krkrz/base/KAGParser.cpp
 --- a/external/krkrz/base/KAGParser.cpp
 +++ b/external/krkrz/base/KAGParser.cpp

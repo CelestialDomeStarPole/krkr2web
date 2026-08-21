@@ -208,6 +208,9 @@
     "patches/0069-psb-script-materialized-root.patch",
     "patches/0070-motionplayer-software-color-modulation.patch",
     "patches/0071-win32dialog-shim.patch",
-    "patches/0072-web-skip-user-cfu-config.patch"
+    "patches/0072-web-skip-user-cfu-config.patch",
+    "patches/0073-tjs-int32-to-hex-zeropad-guard.patch",
+    "patches/0074-web-touch-multi-finger.patch",
+    "patches/0075-k2compat-touchmouse-shim.patch"
   ]
 }

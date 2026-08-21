@@ -1,0 +1,232 @@
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -20,6 +20,12 @@
+ #include "ScriptMgnIntf.h"
+ #include "SystemControl.h"
+ #include "PluginImpl.h"
++#include "TouchPoint.h"
++
++// TouchPoint.cpp from the krkrz environ is not part of the SDL2 build, so
++// the static thresholds it defines live here instead.
++const double TouchPointList::SCALE_THRESHOLD = 5;
++const double TouchPointList::ROTATE_THRESHOLD = 5;
+ #ifdef KRKRZ_ENABLE_CANVAS
+ #include "OpenGLScreenSDL2.h"
+ #endif
+@@ -490,7 +496,7 @@
+ };
+ #endif
+ 
+-class TVPWindowWindow : public TTVPWindowForm
++class TVPWindowWindow : public TTVPWindowForm, public TouchHandler
+ {
+ protected:
+ 	SDL_Window *window;
+@@ -524,6 +530,16 @@
+ 	int lastMouseX;
+ 	int lastMouseY;
+ 
++	// krkr2web: multi-touch state backing the touch-point queries the game's
++	// gesture layer relies on (same contract as the android environ form).
++	TouchPointList touch_points_;
++
++	// Draw-area (game logical) size from SetPaintBoxSize; touch events arrive
++	// normalized so the finger position is scaled through this, not through
++	// the SDL window size (which tracks the canvas element on web).
++	tjs_int PaintAreaWidth = 640;
++	tjs_int PaintAreaHeight = 480;
++
+ #ifdef KRKRSDL2_ENABLE_ZOOM
+ 	tTVPRect FullScreenDestRect;
+ 	tTVPRect LastSentDrawDeviceDestRect;
+@@ -706,9 +722,27 @@
+ 	bool should_try_parent_window(SDL_Event event);
+ 	void window_receive_event(SDL_Event event);
+ 	bool window_receive_event_input(SDL_Event event);
++
++	// TouchHandler: fed by touch_points_ when two fingers are active.
++	virtual void OnTouchScaling(double startdist, double currentdist, double cx, double cy, int flag);
++	virtual void OnTouchRotate(double startangle, double currentangle, double distance, double cx, double cy, int flag);
++	virtual void OnMultiTouch();
++
++	// krkr2web: touch-point queries for the game's gesture layer.
++	virtual void SetTouchScaleThreshold(double threshold) { touch_points_.SetScaleThreshold(threshold); }
++	virtual double GetTouchScaleThreshold() { return touch_points_.GetScaleThreshold(); }
++	virtual void SetTouchRotateThreshold(double threshold) { touch_points_.SetRotateThreshold(threshold); }
++	virtual double GetTouchRotateThreshold() { return touch_points_.GetRotateThreshold(); }
++	virtual tjs_real GetTouchPointStartX(tjs_int index) const { return touch_points_.GetStartX(index); }
++	virtual tjs_real GetTouchPointStartY(tjs_int index) const { return touch_points_.GetStartY(index); }
++	virtual tjs_real GetTouchPointX(tjs_int index) const { return touch_points_.GetX(index); }
++	virtual tjs_real GetTouchPointY(tjs_int index) const { return touch_points_.GetY(index); }
++	virtual tjs_int GetTouchPointID(tjs_int index) const { return touch_points_.GetID(index); }
++	virtual tjs_int GetTouchPointCount() const { return touch_points_.CountUsePoint(); }
+ };
+ 
+ TVPWindowWindow::TVPWindowWindow(tTJSNI_Window *w)
++	: touch_points_(this)
+ {
+ 	this->window = nullptr;
+ 	this->ResetImeMode();
+@@ -927,6 +961,8 @@
+ 
+ void TVPWindowWindow::SetPaintBoxSize(tjs_int w, tjs_int h)
+ {
++	this->PaintAreaWidth = w;
++	this->PaintAreaHeight = h;
+ #ifdef KRKRSDL2_ENABLE_ZOOM
+ 	this->LayerWidth = w;
+ 	this->LayerHeight = h;
+@@ -990,6 +1026,30 @@
+ 	return (int)(((int64_t)nNumber * (int64_t)nNumerator) / nDenominator);
+ }
+ #endif
++
++void TVPWindowWindow::OnTouchScaling(double startdist, double currentdist, double cx, double cy, int flag)
++{
++	if (TJSNativeInstance)
++	{
++		TVPPostInputEvent(new tTVPOnTouchScalingInputEvent(TJSNativeInstance, (tjs_real)startdist, (tjs_real)currentdist, (tjs_real)cx, (tjs_real)cy, flag));
++	}
++}
++
++void TVPWindowWindow::OnTouchRotate(double startangle, double currentangle, double distance, double cx, double cy, int flag)
++{
++	if (TJSNativeInstance)
++	{
++		TVPPostInputEvent(new tTVPOnTouchRotateInputEvent(TJSNativeInstance, (tjs_real)startangle, (tjs_real)currentangle, (tjs_real)distance, (tjs_real)cx, (tjs_real)cy, flag));
++	}
++}
++
++void TVPWindowWindow::OnMultiTouch()
++{
++	if (TJSNativeInstance)
++	{
++		TVPPostInputEvent(new tTVPOnMultiTouchInputEvent(TJSNativeInstance));
++	}
++}
+ 
+ void TVPWindowWindow::TranslateWindowToDrawArea(int &x, int &y)
+ {
+@@ -2715,32 +2775,62 @@
+ 					TVPPostInputEvent(new tTVPOnMouseWheelInputEvent(this->TJSNativeInstance, event.wheel.x, event.wheel.y, this->lastMouseX, this->lastMouseY));
+ 					return true;
+ 				}
+-				case SDL_FINGERMOTION:
++case SDL_FINGERMOTION:
++			case SDL_FINGERDOWN:
++			case SDL_FINGERUP:
++			{
++				// SDL emits normalized [0,1] finger coordinates relative to
++				// the canvas; the game's touch layer (android contract)
++				// expects draw-area pixels, same as the mouse events. Scale
++				// through the game's logical size, not the SDL window size
++				// (on web that tracks the canvas element instead). SDL keeps
++				// synthesizing a left-button mouse from the primary finger,
++				// which matches the dual-track input (click + per-finger
++				// touch) the game was written for, so the finger events are
++				// delivered alongside instead of being dropped.
++				int px = (int)(event.tfinger.x * this->PaintAreaWidth + 0.5f);
++				int py = (int)(event.tfinger.y * this->PaintAreaHeight + 0.5f);
++				this->TranslateWindowToDrawArea(px, py);
++				tjs_uint32 finger_id = (tjs_uint32)event.tfinger.fingerId;
++				tjs_uint32 tick = (tjs_uint32)SDL_GetTicks();
++				switch (event.tfinger.type)
+ 				{
+-					TVPPostInputEvent(new tTVPOnTouchMoveInputEvent(this->TJSNativeInstance, event.tfinger.x, event.tfinger.y, 1, 1, event.tfinger.fingerId));
+-					return true;
++					case SDL_FINGERDOWN:
++						TVPPostInputEvent(new tTVPOnTouchDownInputEvent(this->TJSNativeInstance, (tjs_real)px, (tjs_real)py, 0, 0, finger_id));
++						this->touch_points_.TouchDown(px, py, 0, 0, finger_id, tick);
++						TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_TOUCH down id=")) + ttstr((tjs_int)finger_id)
++							+ ttstr(TJS_W(" pts=")) + ttstr(this->touch_points_.CountUsePoint())
++							+ ttstr(TJS_W(" x=")) + ttstr(px) + ttstr(TJS_W(" y=")) + ttstr(py)
++							+ ttstr(TJS_W(" t=")) + ttstr((tjs_int)tick));
++						break;
++					case SDL_FINGERMOTION:
++						TVPPostInputEvent(new tTVPOnTouchMoveInputEvent(this->TJSNativeInstance, (tjs_real)px, (tjs_real)py, 0, 0, finger_id));
++						this->touch_points_.TouchMove(px, py, 0, 0, finger_id, tick);
++						break;
++					case SDL_FINGERUP:
++						TVPPostInputEvent(new tTVPOnTouchUpInputEvent(this->TJSNativeInstance, (tjs_real)px, (tjs_real)py, 0, 0, finger_id));
++						this->touch_points_.TouchUp(px, py, 0, 0, finger_id, tick);
++						TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_TOUCH up id=")) + ttstr((tjs_int)finger_id)
++							+ ttstr(TJS_W(" pts=")) + ttstr(this->touch_points_.CountUsePoint())
++							+ ttstr(TJS_W(" t=")) + ttstr((tjs_int)tick));
++						break;
+ 				}
+-				case SDL_FINGERDOWN:
+-				case SDL_FINGERUP:
+-				{
+-					switch (event.tfinger.type)
+-					{
+-						case SDL_FINGERDOWN:
+-							TVPPostInputEvent(new tTVPOnTouchDownInputEvent(this->TJSNativeInstance, event.tfinger.x, event.tfinger.y, 1, 1, event.tfinger.fingerId));
+-							break;
+-						case SDL_FINGERUP:
+-							TVPPostInputEvent(new tTVPOnTouchUpInputEvent(this->TJSNativeInstance, event.tfinger.x, event.tfinger.y, 1, 1, event.tfinger.fingerId));
+-							break;
+-					}
+-					return true;
+-				}
+-				case SDL_MULTIGESTURE:
+-				{
+-					TVPPostInputEvent(new tTVPOnTouchScalingInputEvent(this->TJSNativeInstance, 0, event.mgesture.dDist, event.mgesture.x, event.mgesture.y, 0));
+-					TVPPostInputEvent(new tTVPOnTouchRotateInputEvent(this->TJSNativeInstance, 0, event.mgesture.dTheta, event.mgesture.dDist, event.mgesture.x, event.mgesture.y, 0));
+-					return true;
+-				}
+-				case SDL_CONTROLLERBUTTONDOWN:
++				return true;
++			}
++case SDL_MULTIGESTURE:
++			{
++#ifdef __EMSCRIPTEN__
++				// Scaling/rotate are derived from TouchPointList above, with
++				// the start/current semantics the game expects; SDL's own
++				// gesture recognizer would only emit conflicting duplicates.
++				return false;
++#else
++				TVPPostInputEvent(new tTVPOnTouchScalingInputEvent(this->TJSNativeInstance, 0, event.mgesture.dDist, event.mgesture.x, event.mgesture.y, 0));
++				TVPPostInputEvent(new tTVPOnTouchRotateInputEvent(this->TJSNativeInstance, 0, event.mgesture.dTheta, event.mgesture.dDist, event.mgesture.x, event.mgesture.y, 0));
++				return true;
++#endif
++			}
++			case SDL_CONTROLLERBUTTONDOWN:
+ 				case SDL_CONTROLLERBUTTONUP:
+ 				{
+ 					switch (event.cbutton.state)
+diff --git a/src/core/environ/sdl2/TVPWindow.h b/src/core/environ/sdl2/TVPWindow.h
+--- a/src/core/environ/sdl2/TVPWindow.h
++++ b/src/core/environ/sdl2/TVPWindow.h
+@@ -446,16 +446,21 @@
+ 	void SetHintText(iTJSDispatch2* sender, const ttstr &text) {}
+ 	void DisableAttentionPoint() {}
+ 	void GetVideoOffset(tjs_int &ofsx, tjs_int &ofsy) { ofsx = 0; ofsy = 0; }
+-	void SetTouchScaleThreshold(double threshold) {}
+-	double GetTouchScaleThreshold() { return 0; }
+-	void SetTouchRotateThreshold(double threshold) {}
+-	double GetTouchRotateThreshold() { return 0; }
+-	tjs_real GetTouchPointStartX(tjs_int index) const { return 0; }
+-	tjs_real GetTouchPointStartY(tjs_int index) const { return 0; }
+-	tjs_real GetTouchPointX(tjs_int index) const { return 0; }
+-	tjs_real GetTouchPointY(tjs_int index) const { return 0; }
+-	tjs_int GetTouchPointID(tjs_int index) const { return 0; }
+-	tjs_int GetTouchPointCount() const { return 0; }
++	// krkr2web: the touch-point queries back the game's multi-touch gesture
++	// layer (sysscn/gesture.tjs reads Window.touchPointCount / getTouchPoint
++	// to detect a two-finger tap and turn it into a right click). The SDL2
++	// window must therefore supply them through TouchPointList instead of a
++	// static stub, so these are virtual here.
++	virtual void SetTouchScaleThreshold(double threshold) {}
++	virtual double GetTouchScaleThreshold() { return 0; }
++	virtual void SetTouchRotateThreshold(double threshold) {}
++	virtual double GetTouchRotateThreshold() { return 0; }
++	virtual tjs_real GetTouchPointStartX(tjs_int index) const { return 0; }
++	virtual tjs_real GetTouchPointStartY(tjs_int index) const { return 0; }
++	virtual tjs_real GetTouchPointX(tjs_int index) const { return 0; }
++	virtual tjs_real GetTouchPointY(tjs_int index) const { return 0; }
++	virtual tjs_int GetTouchPointID(tjs_int index) const { return 0; }
++	virtual tjs_int GetTouchPointCount() const { return 0; }
+ 	bool GetTouchVelocity(tjs_int id, float& x, float& y, float& speed) const { return false; }
+ 	void ResetDrawDevice() {}
+ #ifdef USE_OBSOLETE_FUNCTIONS

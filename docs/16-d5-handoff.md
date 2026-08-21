@@ -4,36 +4,53 @@
 > 新 Agent 请**先通读全文**再动手，尤其是「环境陷阱」一节——那里记录了几个
 > 会浪费大量时间的非显而易见问题。
 >
-> 最近提交：3d70046 / 7cdaf73（git log --oneline 可看全部历史）。
+> 最近提交：6cdb302（全链路可玩）与其后的触摸手势修复（git log --oneline
+> 可看全部历史）。
 
 ---
 
-## 0. 2026-08-15 最新状态（优先于旧章节）
+## 0. 2026-08-21 最新状态（优先于旧章节）
 
-真实《千恋万花》已经从简体中文标题页进入 `CHAPTER 1-1`，剧情文字正确渲染，
-不再处于本文件旧版所述的黑屏、`[s]` 输入、`uiloadSetRect` 或 `start.ks:43`
-阻断。最终验证无致命弹窗、`firstError=null`，且 4.04 GB 缓存身份未变化。
+`6cdb302`（2026-08-20）达成项目首个“完整可玩”里程碑：真实《千恋万花》
+在本地 Chrome 与目标设备上全流程可玩（剧情推进、存读档、场景回想、CG
+鉴赏）。该提交的主要内容（细节见 git log 与 docs/17）：
 
-本轮在标题页里程碑之后完成：
+- Dedicated Worker + OffscreenCanvas 变体（engine-worker.js /
+  engine-worker-host.js / worker-runtime-contract.json；实机自动回落
+  baseline 主线程变体）；
+- motionplayer 真移植（补丁 0048-0057 系列 + MotionRenderCompat.cpp
+  软件光栅路径）；
+- win32dialog TJS 垫片（0071）、native windowEx-web 插件（0059）；
+- 视频覆盖桥（0042）、GPU style present 快速转场（0045）、输入帧预算
+  （0046）等性能项；
+- 存档管理器（save-manager.js）与播放器崩溃恢复/强制重启链路。
 
-- `0035-emscripten-input-path.patch`：SDL 事件观察器改为排队，避免 DOM 回调
-  嵌套执行游戏逻辑而破坏 Asyncify；
-- `engine/plugins/textrender/TextRender.cpp`：21 处真假转换显式调用
-  `operator bool()`，修复 Integer-to-Object 崩溃；
-- `senren-banka-v1.json`：增加 `-deffont=Source Han Sans SC`，剧情字体不再
-  依赖 WebAssembly 环境中不存在的 Android 系统字体；
-- `0038-ogg-vorbis-streaming.patch` 与 `engine/audio/OggVorbisDecoder.cpp`：
-  OGG 流式解码，控制长音频的内存峰值；
-- `apps/web/player.js`：在启动点击手势中创建 AudioContext，并让 OpenAL 复用，
-  标题随机角色语音已验证产生非静音 PCM；
-- `apps/web/save-manager.js`：本机存档查看、分类、选择删除和全部删除；
-- 同页强制重启与崩溃恢复：同步存档后销毁旧 Wasm/IDBFS/XP3/AudioContext，
-  替换 Canvas 并创建新实例，URL 不变，断网恢复不产生网络请求。
+本轮（2026-08-21，补丁 0074-0075）修复触摸手势链——**CG 鉴赏双指点按
+无法退出**（原生把双指 tap 映射为右键）：
 
-自动化现状：20 项 Python 测试通过；D4 浏览器回归验证断网启动、音频上下文、
-存档删除、主动重启和模拟致命弹窗恢复，启动及重启均为 0 网络请求。下一项是
-目标 WebView 实机复核上述用户可见行为，再继续推进真实存读档、长剧情和稳定性。
-motionplayer 动画及 WMV/AlphaMovie 视频仍未实现；视频仍是后续版本硬性范围。
+- 0074（引擎层）：SDL 触摸事件按 android 契约投递——归一化坐标换算
+  draw-area 像素、TouchPointList 多点跟踪支撑 Window.touchPointCount /
+  getTouchPoint 查询族、scaling/rotate/multiTouch 由其派生；web 下丢弃
+  SDL_MULTIGESTURE 重复源；0044 的旧“丢弃 FINGER”改法移除；
+- 0075（TJS 层）：Window.TouchMouse 垫片类（原生机制住在 k2compat 插件
+  本体）。实例回调把引擎 onTouchDown/Move/Up 桥接进游戏 action 事件链，
+  并自跟踪手指：双指点按（≤900ms、位移 ≤80px）→
+  win.onPrimaryRightClick()；
+- apps/web/styles.css：canvas `touch-action:none`，浏览器不再抢双指手势。
+
+实机用户已确认双指退出与单击推进均正常。根因链与 TJS 语言陷阱
+（无词法闭包、TouchMouse 的 owner 即 kag）详见
+[15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。
+
+剩余已知问题（按优先级）：
+
+1. Logo 动画只显示蓝色：双缺陷（源解码 R/B 交换 + ltAlpha 合成去色），
+   已定位未修复，结论记录在
+   [15-d5-compat-status.md](15-d5-compat-status.md) 文末遗留章节；
+2. 长期卡顿优化：新游戏开场约 25s 的 scenestart 同步加载停顿
+   （场景预热/分帧物化为候选方案；ED 增量转码远期）；
+3. worker 变体桌面黑屏 bug：本地 headless 必现、headed 正常；实机走
+   baseline 变体不受影响（低优先）。
 
 旧章节 2、5、6 是历史快照，排障细节仍有价值，但其中的当前状态和优先级均已
 被本节取代。
@@ -99,7 +116,8 @@ canvas（950x950）基本全黑：约 16 种颜色、3725 个非暗像素（多�
 
 ### 3.1 目录结构
 
-- engine/ ：**项目自有资产**（git 跟踪）。engine/patches/*.patch（34 个）、
+- engine/ ：**项目自有资产**（git 跟踪）。engine/patches/*.patch（已到
+  0075；权威清单以 engine/upstream.json 为准）、
   engine/plugins/（项目自有插件源码，构建时复制进 build 树）、
   engine/web/（web shim）、engine/webp/LoadWEBP.cpp（WebP 加载器）、
   engine/upstream.json（锁：仓库 commit + sourceImports + patches 列表）。
@@ -242,7 +260,9 @@ EventName 一起打出来（ttstr 是 UTF-16，需要转窄或用 TVPUtf16ToUtf8
 | --- | --- |
 | engine/upstream.json | 构建锁：补丁列表 + sourceImports |
 | engine/patches/0034-kag-diagnostics.patch | KRKR2WEB_SCENARIO/LABEL 日志 |
-| engine/patches/0035-emscripten-input-path.patch | **输入断点修复**（本轮核心） |
+| engine/patches/0035-emscripten-input-path.patch | 鼠标/键盘输入断点修复（历史核心） |
+| engine/patches/0074-web-touch-multi-finger.patch | 触摸多点投递（touchPointCount 查询族） |
+| engine/patches/0075-k2compat-touchmouse-shim.patch | TouchMouse 垫片（双指点按=右键） |
 | engine/plugins/layerExDraw.cpp | stub（勿注册 clear） |
 | tools/apply_patch.py | Python 补丁应用器 |
 | tools/build_d3.ps1 | 构建流水线 |

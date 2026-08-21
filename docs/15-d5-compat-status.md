@@ -110,7 +110,7 @@ uipsd/langselect.ini（二进制 ini，非阻断）。
 | csvParser.dll | ✅ OLD tp_stub 真注册（补丁 0018-0019） | CSVParser 全局类（配置 CSV 解析异常解除） |
 | getLangName.dll | ✅ TJS 垫片（补丁 0021） | System.getCurrentUILangName 回落 ja/日本語 |
 | windowEx.dll | ✅ TJS 垫片（补丁 0022） | Window.getNotificationNum/setDispMode（getNotificationNum 异常解除） |
-| k2compat.dll | no-op（优雅降级） | 游戏自带 Krkr2CompatUtils fallback |
+| k2compat.dll | ✅ TJS 垫片（补丁 0075） | Window.TouchMouse 触摸手势（双指点按=右键），见文末触摸章节 |
 | KAGParserEx.dll | no-op | KAG 解析扩展；缺 kag.setMessageHook（keybinder.tjs 当前阻断） |
 | layerExImage/Raster/Draw/BtoA.dll | no-op | 图层扩展；缺 Layer.loadImages（sqscr.tjs 当前阻断） |
 | textrender.dll | no-op | 文本渲染（kirikiroid2-web 有参考实现） |
@@ -567,3 +567,65 @@ avg_ms=35 max_ms=2117（单帧最长 2.1s），心跳按 64-tick 计数 → 墙�
 待验证：音频进度条（GetCurrentPlaySamples→AL_SAMPLE_OFFSET，
 emscripten sourceTell 依赖 bufQueue[0]，实现存在；若 720p 后仍不动，
 下一轮用 PlaySoundPosition 诊断区分引擎侧/游戏 UI 侧）。
+
+## 触摸手势链：CG 鉴赏双指退出（2026-08-21，补丁 0074-0075）
+
+实机反馈：CG 鉴赏打开一张 CG 后无法退出——原生版以双指点按（映射为
+右键）退出查看。事件链逐层排查结论：
+
+1. **引擎层（补丁 0074）**：sdl2 端口此前只把 SDL FINGER 事件按归一化
+   坐标投递（甚至一度在 web 上直接丢弃，见 0044 旧改法）。0074 对齐
+   android environ 契约：FINGER 坐标从 [0,1] 归一化换算成 draw-area
+   像素（用 SetPaintBoxSize 的游戏逻辑尺寸，而非跟随 canvas 元素的
+   SDL 窗口尺寸）；每根手指 down/move/up 进入 TouchPointList，窗口
+   实现了 touchPointCount / getTouchPoint(X/Y/ID/StartX/StartY) 查询族
+   （TVPWindow 侧虚化）；OnTouchScaling/OnTouchRotate/OnMultiTouch 由
+   TouchPointList 按阈值派生；web 下丢弃 SDL_MULTIGESTURE 避免冲突
+   副本。SDL 仍自动把主指合成左键——单击推进文本依赖此路径，保持不变。
+   0044 里旧的“web 丢弃 FINGER 事件”临时改法随之移除。
+2. **游戏手势层是死路（根因）**：gesture.tjs 的 onTouchUp → endGesture
+   对触摸 tap 走 invokeLeftClickOnIgnoreTouchMouse，但 yuzu_system.tjs
+   的 resetTouchMouseEnabled 计算被官方注释，touchMouseEnabled 恒真 →
+   该函数恒直接 return，手势层零输出。原生“双指点按=右键”的机制在
+   k2compat 插件的 TouchMouse 本体（OS 触摸→鼠标转换），web 端
+   k2compat 此前是 no-op。
+3. **TJS 垫片（补丁 0075）**：Plugins.link("k2compat.dll") 时注入
+   Window.TouchMouse 类——构造器覆盖 MainWindow 实例的
+   onTouchDown/Move/Up/onTouchScaling/onTouchRotate 回调，把每个事件
+   重发为游戏动作事件（win.action / callHook('onEventActionHook')）；
+   同时自行跟踪手指，双指点按（时长 ≤900ms、总位移 ≤80px）→
+   win.onPrimaryRightClick()（失败回落 rightClickHook）。
+
+页面配套：`.player-stage canvas { touch-action: none }`——浏览器不再把
+双指手势抢走当页面缩放/滚动。
+
+本轮实证的两个 TJS 语言事实（记录防重蹈）：
+
+- **TJS2 没有词法闭包**：匿名函数不捕获外层局部变量（调用时抛
+  "Member xxx does not exist"）。垫片的实例回调必须自包含，经
+  `global.KRKR2WebTouchMouseActive` 全局引用取回实例。
+- TouchMouse 的 owner 形参就是 kag 对象本身（勿读 `owner.owner`）；
+  判存在须写 `typeof global.Window.TouchMouse == 'undefined'`（typeof
+  对不存在的成员也恒返回字符串而不抛错，等值左边必须显式 global 域）。
+
+验证：本地真游戏 CG 旅程（CDP 双指 tap）日志出现
+`KRKR2WEB_SHIM 2finger tap rightclick dur=430 moved=0`，画面 diff 确认
+回到缩略图网格；单击推进回归正常。随后实机用户确认双指退出与单击
+推进均符合预期。
+
+排查工具沉淀（gitignored，重算丢失可按本文档重建）：.tmp/tjs_disasm2.py
+（TJS2 字节码反汇编器）、.tmp/cg-act.js（CG 旅程 harness；须 headed 模式
++ route 屏蔽 engine-worker-host.js 强制 baseline 变体，否则命中桌面
+worker 黑屏 bug）。
+
+## 遗留：Logo 动画只显示蓝色（已定位，未修复）
+
+标题前厂商 Logo 动画画面整体偏蓝。离屏复现（.tmp/logo-repro/，证据
+FINDINGS.md，gitignored）定位为两个独立缺陷叠加：
+
+- **Bug A（源解码 R/B 交换）**：logo 素材（icon35 等像素）的解码生产者
+  输出了 R/B 通道交换的像素，修复位置在该像素生产者处补 TVPReverseRGB；
+- **Bug B（ltAlpha 合成去色）**：ltAlpha 混合路径在合成时把颜色信息
+  丢掉，只剩亮度/单色。
+
+两者都要修 Logo 才能恢复正常色彩；触摸手势轮次未动此处，待后续专项。

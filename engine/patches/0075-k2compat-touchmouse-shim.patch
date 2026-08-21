@@ -1,0 +1,189 @@
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -2421,4 +2421,185 @@
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM win32dialog.dll"));
+ 	}
++	else if(name == TJS_W("k2compat.dll") || name == TJS_W("kztouch.dll"))
++	{
++		// krkr2web: the native k2compat/kztouch plugins register
++		// Window.TouchMouse and pump OS touch input into the game's KAG
++		// action events. sysscn/gesture.tjs MouseGestureBase news
++		// Window.TouchMouse(owner) passing the MainWindow itself (it calls
++		// owner.add / owner.addHook on that same object; the shim must never
++		// read owner.owner - that member does not exist and the resulting
++		// exception killed game boot on device). gesture.tjs consumes touch
++		// through onEventActionHook (ev.target/ev.type/ev.x/ev.y/ev.cx/ev.cy/
++		// ev.id) and gates on owner.touchPointCount, which the SDL2 window
++		// already maintains natively with the right queue ordering (count
++		// includes a finger before its onTouchDown runs, excludes it before
++		// onTouchUp runs). So the shim only bridges the krkrz-style Window
++		// onTouchDown/Move/Up callbacks on the MainWindow instance into
++		// win.action(ev); MainWindow.action forwards unknown event types to
++		// callHook("onEventActionHook"). onMultiTouch is re-fired when a
++		// second finger lands (gesture.tjs cancels the pending tap on it).
++		// The SDL layer synthesizes the primary-finger left button, so unlike
++		// the native TouchMouse this one never synthesizes mouse events
++		// itself. Every step is wrapped so a failure can never throw into
++		// game boot again. TJS dialect notes: typeof of a function is
++		// 'Object' (use 'in' for member presence) and anonymous functions
++		// have NO lexical closure over constructor locals (a captured
++		// 'self' reads as a missing member at call time), so the callbacks
++		// resolve the instance through global.KRKR2WebTouchMouseActive
++		// instead of captured variables.
++		TVPExecuteScript(
++			TJS_W("if (typeof global.Window.TouchMouse == 'undefined') { ")
++			TJS_W("class KRKR2WebTouchMouse { ")
++			TJS_W("var owner = void; var win = void; var enabled = true; ")
++			TJS_W("function KRKR2WebTouchMouse(owner) { ")
++			TJS_W("  this.owner = owner; ")
++			TJS_W("  var win = owner; ")
++			TJS_W("  if (win === void || !isvalid win) return; ")
++			TJS_W("  var ok = false; ")
++			TJS_W("  try { ok = 'addHook' in win; } catch(e) { ok = false; } ")
++			TJS_W("  if (!ok) return; ")
++			TJS_W("  this.win = win; ")
++			TJS_W("  try { global.KRKR2WebTouchMouseActive = this; } catch(e) { } ")
++			TJS_W("  try { Debug.message('KRKR2WEB_SHIM ctor ok'); } catch(e) { } ")
++			TJS_W("  try { ")
++			TJS_W("    win.onTouchDown = function(x, y, cx, cy, id) { ")
++			TJS_W("      try { ")
++			TJS_W("        var shim = global.KRKR2WebTouchMouseActive; ")
++			TJS_W("        if (shim !== void && isvalid shim) { shim.trackDown(x, y, id); shim.fire('onTouchDown', x, y, cx, cy, id); } ")
++			TJS_W("      } catch(e) { } ")
++			TJS_W("    }; ")
++			TJS_W("    win.onTouchMove = function(x, y, cx, cy, id) { ")
++			TJS_W("      try { ")
++			TJS_W("        var shim = global.KRKR2WebTouchMouseActive; ")
++			TJS_W("        if (shim !== void && isvalid shim) { shim.trackMove(x, y, id); shim.fire('onTouchMove', x, y, cx, cy, id); } ")
++			TJS_W("      } catch(e) { } ")
++			TJS_W("    }; ")
++			TJS_W("    win.onTouchUp = function(x, y, cx, cy, id) { ")
++			TJS_W("      try { ")
++			TJS_W("        var shim = global.KRKR2WebTouchMouseActive; ")
++			TJS_W("        if (shim !== void && isvalid shim) { shim.fire('onTouchUp', x, y, cx, cy, id); shim.trackUp(x, y, id); } ")
++			TJS_W("      } catch(e) { } ")
++			TJS_W("    }; ")
++			TJS_W("    win.onTouchScaling = function(sd, cd, cx, cy, flag) { ")
++			TJS_W("      try { ")
++			TJS_W("        var shim = global.KRKR2WebTouchMouseActive; ")
++			TJS_W("        if (shim !== void && isvalid shim) shim.fireScaling(sd, cd, cx, cy, flag); ")
++			TJS_W("      } catch(e) { } ")
++			TJS_W("    }; ")
++			TJS_W("    win.onTouchRotate = function(sa, ca, dist, cx, cy, flag) { ")
++			TJS_W("      try { ")
++			TJS_W("        var shim = global.KRKR2WebTouchMouseActive; ")
++			TJS_W("        if (shim !== void && isvalid shim) shim.fireRotate(sa, ca, dist, cx, cy, flag); ")
++			TJS_W("      } catch(e) { } ")
++			TJS_W("    }; ")
++			TJS_W("  } catch(e) { this.win = void; } ")
++			TJS_W("} ")
++			TJS_W("function TouchMouse(owner) { KRKR2WebTouchMouse(owner); } ")
++			TJS_W("var fingers = []; ")
++			TJS_W("var activeCount = 0; ")
++			TJS_W("var maxActive = 0; ")
++			TJS_W("var firstDownTick = 0; ")
++			TJS_W("var maxMoved = 0; ")
++			TJS_W("function findFinger(id) { ")
++			TJS_W("  var i; ")
++			TJS_W("  for (i = 0; i < fingers.count; i++) { if (fingers[i].id === id) return i; } ")
++			TJS_W("  return -1; ")
++			TJS_W("} ")
++			TJS_W("function trackDown(x, y, id) { ")
++			TJS_W("  var now = 0; ")
++			TJS_W("  try { now = System.getTickCount(); } catch(e) { } ")
++			TJS_W("  fingers.push(%[ \"id\" => id, \"sx\" => x, \"sy\" => y, \"moved\" => 0 ]); ")
++			TJS_W("  activeCount = activeCount + 1; ")
++			TJS_W("  if (activeCount > maxActive) maxActive = activeCount; ")
++			TJS_W("  if (activeCount == 1) firstDownTick = now; ")
++			TJS_W("} ")
++			TJS_W("function trackMove(x, y, id) { ")
++			TJS_W("  var i = this.findFinger(id); ")
++			TJS_W("  if (i < 0) return; ")
++			TJS_W("  var f = fingers[i]; ")
++			TJS_W("  var d = 0; ")
++			TJS_W("  try { d = Math.abs(x - f.sx) + Math.abs(y - f.sy); } catch(e) { d = 0; } ")
++			TJS_W("  if (d > f.moved) f.moved = d; ")
++			TJS_W("  if (f.moved > this.maxMoved) this.maxMoved = f.moved; ")
++			TJS_W("} ")
++			TJS_W("function trackUp(x, y, id) { ")
++			TJS_W("  var i = this.findFinger(id); ")
++			TJS_W("  if (i >= 0) fingers.erase(i); ")
++			TJS_W("  if (activeCount > 0) activeCount = activeCount - 1; ")
++			TJS_W("  if (activeCount != 0) return; ")
++			TJS_W("  var dur = 0; ")
++			TJS_W("  try { dur = System.getTickCount() - this.firstDownTick; } catch(e) { dur = 0; } ")
++			TJS_W("  var multi = this.maxActive; ")
++			TJS_W("  var moved = this.maxMoved; ")
++			TJS_W("  this.maxActive = 0; ")
++			TJS_W("  this.maxMoved = 0; ")
++			TJS_W("  if (multi < 2) return; ")
++			TJS_W("  if (dur > 900) return; ")
++			TJS_W("  if (moved > 80) return; ")
++			TJS_W("  try { Debug.message('KRKR2WEB_SHIM 2finger tap rightclick dur=' + dur + ' moved=' + moved); } catch(e) { } ")
++			TJS_W("  var win = this.win; ")
++			TJS_W("  try { ")
++			TJS_W("    if (win.onPrimaryRightClick !== void) win.onPrimaryRightClick(); ")
++			TJS_W("  } catch(e) { ")
++			TJS_W("    try { win.callHook('rightClickHook'); } catch(e) { } ")
++			TJS_W("  } ")
++			TJS_W("} ")
++			TJS_W("function fire(type, x, y, cx, cy, id) {   var win = this.win; ")
++			TJS_W("  if (win === void || !isvalid win) return; ")
++			TJS_W("  if (type == 'onTouchDown' || type == 'onTouchUp') { ")
++			TJS_W("    try { Debug.message('KRKR2WEB_SHIM ' + type + ' pts=' + win.touchPointCount); } catch(e) { } ")
++			TJS_W("  }   var ev = %[ \"target\" => win, \"type\" => type, \"x\" => x, \"y\" => y, ")
++			TJS_W("    \"cx\" => cx, \"cy\" => cy, \"id\" => id, \"cursorX\" => x, \"cursorY\" => y ]; ")
++			TJS_W("  this.deliver(ev); ")
++			TJS_W("  if (type == 'onTouchDown') {     var multi = false; ")
++			TJS_W("    try { multi = win.touchPointCount >= 2; } catch(e) { multi = false; } ")
++			TJS_W("    if (multi) { ")
++			TJS_W("      var mev = %[ \"target\" => win, \"type\" => 'onMultiTouch', \"x\" => void, ")
++			TJS_W("        \"y\" => void, \"cx\" => void, \"cy\" => void, \"id\" => void ]; ")
++			TJS_W("      this.deliver(mev); ")
++			TJS_W("    } ")
++			TJS_W("  } ")
++			TJS_W("} ")
++			TJS_W("function fireScaling(sd, cd, cx, cy, flag) { ")
++			TJS_W("  var win = this.win; ")
++			TJS_W("  if (win === void || !isvalid win) return; ")
++			TJS_W("  var ev = %[ \"target\" => win, \"type\" => 'onTouchScaling', \"startdistance\" => sd, ")
++			TJS_W("    \"currentdistance\" => cd, \"cx\" => cx, \"cy\" => cy, \"flag\" => flag ]; ")
++			TJS_W("  this.deliver(ev); ")
++			TJS_W("} ")
++			TJS_W("function fireRotate(sa, ca, dist, cx, cy, flag) { ")
++			TJS_W("  var win = this.win; ")
++			TJS_W("  if (win === void || !isvalid win) return; ")
++			TJS_W("  var ev = %[ \"target\" => win, \"type\" => 'onTouchRotate', \"startangle\" => sa, ")
++			TJS_W("    \"currentangle\" => ca, \"distance\" => dist, \"cx\" => cx, \"cy\" => cy, \"flag\" => flag ]; ")
++			TJS_W("  this.deliver(ev); ")
++			TJS_W("} ")
++			TJS_W("function deliver(ev) { ")
++			TJS_W("  var win = this.win; ")
++			TJS_W("  if (win === void || !isvalid win) return; ")
++			TJS_W("  try { ")
++			TJS_W("    if (win.action !== void) win.action(ev); ")
++			TJS_W("    else win.callHook('onEventActionHook', ev); ")
++			TJS_W("  } catch(e) { ")
++			TJS_W("    try { win.callHook('onEventActionHook', ev); } catch(e) { } ")
++			TJS_W("  } ")
++			TJS_W("} ")
++			TJS_W("function enableTouch() { return true; } ")
++			TJS_W("function onTouchMouseDown(x, y, cx, cy, id) { } ")
++			TJS_W("function onTouchMouseMove(x, y, cx, cy, id) { } ")
++			TJS_W("function onTouchMouseUp(x, y, cx, cy, id) { } ")
++			TJS_W("function onTouchMouseClick(x, y, id) { } ")
++			TJS_W("function onTouchMouseDblClick(x, y, id) { } ")
++			TJS_W("function finalize() { ")
++			TJS_W("  try { if (global.KRKR2WebTouchMouseActive === this) global.KRKR2WebTouchMouseActive = void; } catch(e) { } ")
++			TJS_W("  this.owner = void; this.win = void; ")
++			TJS_W("} ")
++			TJS_W("} ")
++			TJS_W("global.Window.TouchMouse = KRKR2WebTouchMouse; ")
++			TJS_W("} ")
++			,
++			TJS_W("krkr2web-touchmouse-shim"), 0);
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM ")) + name);
++	}
+ 	else if(name == TJS_W("getLangName.dll"))
+ 	{

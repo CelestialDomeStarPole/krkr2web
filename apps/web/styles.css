@@ -93,7 +93,7 @@ h1 { margin: 0; font-size: 25px; }
 .icon-button { width: 38px; height: 38px; display: inline-grid; place-items: center; padding: 0; border: 1px solid #505960; border-radius: 4px; background: transparent; color: #f1f3f4; font-size: 22px; line-height: 1; }
 .stop-button { border-color: #754c50; color: #ff9299; font-size: 15px; }
 .player-stage { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; background: #020303; }
-.player-stage canvas { width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; display: block !important; outline: none; }
+.player-stage canvas { width: 100% !important; height: 100% !important; min-width: 0; min-height: 0; display: block !important; outline: none; touch-action: none; }
 .player-loading-panel { position: absolute; z-index: 5; left: 50%; top: 50%; width: min(420px, calc(100% - 40px)); display: grid; gap: 8px; transform: translate(-50%, -50%); padding: 20px; border: 1px solid #41494f; border-radius: 6px; background: rgba(20, 24, 27, .96); text-align: center; pointer-events: none; }
 .player-loading-panel strong { font-size: 17px; }
 .player-loading-panel span { color: #aab2b8; font-size: 13px; line-height: 1.5; }
