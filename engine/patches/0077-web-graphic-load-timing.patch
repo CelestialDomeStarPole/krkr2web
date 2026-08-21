@@ -1,0 +1,35 @@
+# krkr2web: per-storage graphic load timing on web. Every TVPLoadGraphic
+# cache miss that takes >=50ms logs name/bytes/milliseconds through
+# TVPAddImportantLog, so a local run of the new-game scenestart window shows
+# exactly which storages make up the ~25s single-tick decode burst.
+diff --git a/external/krkrz/visual/GraphicsLoaderIntf.cpp b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+--- a/external/krkrz/visual/GraphicsLoaderIntf.cpp
++++ b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+@@ -1844,11 +1844,27 @@ void TVPLoadGraphic(tTVPBaseBitmap *dest, const ttstr &name, tjs_int32 keyidx,
+ 	// load into dest
+ 	tTVPGraphicImageData * data = NULL;
+ 
++#ifdef __EMSCRIPTEN__
++	const tjs_uint64 krkr2webLoadStart = TVPGetTickCount();
++#endif
+ 	ttstr pn;
+ 	std::vector<tTVPGraphicMetaInfoPair> * mi = NULL;
+ 	try
+ 	{
+ 		TVPInternalLoadGraphic(dest, nname, keyidx, desw, desh, &mi, mode, &pn, unpadding);
++#ifdef __EMSCRIPTEN__
++		// krkr2web: per-storage decode timing for scenestart stall analysis.
++		{
++			const tjs_uint krkr2webLoadMs =
++				static_cast<tjs_uint>(TVPGetTickCount() - krkr2webLoadStart);
++			if(krkr2webLoadMs >= 50)
++				TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_LOAD ms=")) +
++					ttstr((tjs_int)krkr2webLoadMs) + TJS_W(" bytes=") +
++					ttstr(static_cast<tjs_int>(dest->GetWidth()) *
++						static_cast<tjs_int>(dest->GetHeight()) * 4) +
++					TJS_W(" name=") + nname);
++		}
++#endif
+ 
+ 		if(provincename) *provincename = pn;
+ 		if(metainfo)
