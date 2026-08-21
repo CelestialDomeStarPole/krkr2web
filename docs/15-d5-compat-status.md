@@ -618,14 +618,28 @@ emscripten sourceTell 依赖 bufQueue[0]，实现存在；若 720p 后仍不动�
 + route 屏蔽 engine-worker-host.js 强制 baseline 变体，否则命中桌面
 worker 黑屏 bug）。
 
-## 遗留：Logo 动画只显示蓝色（已定位，未修复）
+## Logo 蓝色问题修复（2026-08-21，补丁 0076）
 
-标题前厂商 Logo 动画画面整体偏蓝。离屏复现（.tmp/logo-repro/，证据
-FINDINGS.md，gitignored）定位为两个独立缺陷叠加：
+标题前厂商 Logo 动画整体偏蓝/灰。离屏复现 + PSB 二进制实证
+（.tmp/psb_extract.py 直接解析 m2logo.mtn）定位根因：
 
-- **Bug A（源解码 R/B 交换）**：logo 素材（icon35 等像素）的解码生产者
-  输出了 R/B 通道交换的像素，修复位置在该像素生产者处补 TVPReverseRGB；
-- **Bug B（ltAlpha 合成去色）**：ltAlpha 混合路径在合成时把颜色信息
-  丢掉，只剩亮度/单色。
+**PSB 纹理载荷（pixel chunk / 调色板 / win 源 RGBA8）本身就是 krkr 序
+BGRA**（uint32 0xAARRGGBB；icon35 调色板原始字节 `28 28 d2 ff`，红 C 的
+R=0xD2 在高位）。上游 kirikiroid2 链在像素进纹理前调 TVPReverseRGB 转
+RGBA 字节序——那是因为它的 `TVPTextureFormat::RGBA` 纹理是 GL
+RGBA/UNSIGNED_BYTE（R 在低地址）；而 web 软件 WebMotionTexture 按 uint32
+原样存取（krkr 语义），这次反转成了多余的错转 → 所有 PSB 来源 Emote
+纹理红蓝互换（红 C 0xFFD22828 被翻成 0xFF2828D2）。
 
-两者都要修 Logo 才能恢复正常色彩；触摸手势轮次未动此处，待后续专项。
+修复（补丁 0076）：删 ObjSource::ensureTexture / decodeKrkrAtlasRecord /
+winsrc RGBA8 共 7 处 TVPReverseRGB，PSB 字节原样进纹理。
+
+验证：logo repro 从"canvas 全域 0 彩色像素"变为 9048（红/绿/蓝字母
+齐全）；真游戏（本地 8766）m2logo 帧红 C 以 (210,40,40) 正确出现，标题
+立绘肤色正常无回归。前轮 FINDINGS 记录的"ltAlpha 合成去色"（Bug B）
+症状随本修复消失——它是错色叠加观察的衍生现象，非独立缺陷。
+
+排查方法论沉淀：像素生产者用运行时插桩定位（CreateTexture2D 两个重载
+打首像素，stderr 经 probe 页 printErr 进 report.json 的 logs 数组，不在
+console）；PSB 字节序用 python 直接解容器验证（.tmp/psb_extract.py，
+names trie/字典二分/chunk 表的解码契约照搬 psbfile 参考实现）。

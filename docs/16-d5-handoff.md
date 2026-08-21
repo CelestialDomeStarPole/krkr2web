@@ -38,19 +38,23 @@
   win.onPrimaryRightClick()；
 - apps/web/styles.css：canvas `touch-action:none`，浏览器不再抢双指手势。
 
-实机用户已确认双指退出与单击推进均正常。根因链与 TJS 语言陷阱
+实机用户已确认双指退出与单击推进均正常。同日第二轮修复 Logo 蓝色
+（补丁 0076：PSB 纹理字节序本就是 krkr 序，删除上游多余的
+TVPReverseRGB；repro 与真游戏双验证，详见 15 号文档文末）。
+
+根因链与 TJS 语言陷阱
 （无词法闭包、TouchMouse 的 owner 即 kag）详见
 [15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。
 
 剩余已知问题（按优先级）：
 
-1. Logo 动画只显示蓝色：双缺陷（源解码 R/B 交换 + ltAlpha 合成去色），
-   已定位未修复，结论记录在
-   [15-d5-compat-status.md](15-d5-compat-status.md) 文末遗留章节；
-2. 长期卡顿优化：新游戏开场约 25s 的 scenestart 同步加载停顿
+1. 长期卡顿优化：新游戏开场约 25s 的 scenestart 同步加载停顿
    （场景预热/分帧物化为候选方案；ED 增量转码远期）；
-3. worker 变体桌面黑屏 bug：本地 headless 必现、headed 正常；实机走
+2. worker 变体桌面黑屏 bug：本地 headless 必现、headed 正常；实机走
    baseline 变体不受影响（低优先）。
+
+Logo 蓝色问题已于 2026-08-21 修复（补丁 0076，PSB 纹理 R/B 交换，
+详见 [15-d5-compat-status.md](15-d5-compat-status.md) 文末章节）。
 
 旧章节 2、5、6 是历史快照，排障细节仍有价值，但其中的当前状态和优先级均已
 被本节取代。
