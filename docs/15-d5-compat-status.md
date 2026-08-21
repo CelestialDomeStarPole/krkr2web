@@ -643,3 +643,19 @@ winsrc RGBA8 共 7 处 TVPReverseRGB，PSB 字节原样进纹理。
 打首像素，stderr 经 probe 页 printErr 进 report.json 的 logs 数组，不在
 console）；PSB 字节序用 python 直接解容器验证（.tmp/psb_extract.py，
 names trie/字典二分/chunk 表的解码契约照搬 psbfile 参考实现）。
+
+## 新游戏 25s 停顿：数据采集进行中（2026-08-21）
+
+已知（上一轮实机 + 本轮补充）：单 tick 24.7s、堆 +200MB 至 556MB 平台，
+非死锁。本轮补丁 0077 给 TVPLoadGraphic 缓存 miss 加了
+KRKR2WEB_D5_LOAD ms/bytes/name 计时日志（>=50ms），并实测：8MB WebP
+全屏图解码 70-100ms、11MB PSB 子层 ~100ms——**25 张图仅约 2.5s，无法
+解释 24.7s**，大头疑在 PSB（.pimg）整体物化或 XP3 解压/IDB 读取突发，
+待下一轮在真实新游戏窗口用该日志取构成清单再定方案（候选：场景预热、
+分帧物化、学习式预载清单）。
+
+标题 UI 导航坐标（client 坐标，画布上方有 52px 顶栏，截图坐标需 -52）：
+新游戏菜单列在左侧 x≈150；本轮实证 (150,645) = 场景回想（flowchart）；
+(150,770) = 鉴赏（历史实证）；"新游戏/最初から"具体 y 未命中
+（试过 575/338 均点空），下轮可从 flowchart 页面的场景节点直接进入
+场景加载窗口取数。
