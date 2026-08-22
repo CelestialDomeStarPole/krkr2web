@@ -868,6 +868,57 @@
     if (stallToastTimer) { clearTimeout(stallToastTimer); stallToastTimer = 0; }
   }
   window.krkr2webEngineHeartbeat = function () { engineHeartbeatAt = Date.now(); };
+  // ---- engine modal dialog bridge (win32dialog shim messageBox) ----
+  // The engine's krkr2webAskMessageBox (patch 0078) shows a real question
+  // here instead of answering a canned IDNO, so game confirm dialogs
+  // (exit / replay-quit / scene-skip) actually reach their YES branch and a
+  // confirmed exit returns the page to the library.
+  var engineDialogSeq = 0;
+  var engineDialogs = {};  // token -> { result: 0|1(idok/idyes/idno), node }
+  function engineDialogButtons(flags) {
+    // Win32: MB_YESNO (0x4) renders 是/否, anything else a single OK.
+    return (flags & 4) ? [["是", 6], ["否", 7]] : [["确定", 1]];
+  }
+  window.krkr2webDialogAsk = function (text, caption, flags) {
+    var token = ++engineDialogSeq;
+    var node = document.createElement("div");
+    node.className = "engine-dialog";
+    var panel = document.createElement("div");
+    panel.className = "engine-dialog-panel";
+    var title = document.createElement("strong");
+    title.textContent = caption || "确认";
+    var body = document.createElement("span");
+    body.textContent = text || "";
+    var row = document.createElement("div");
+    row.className = "engine-dialog-actions";
+    engineDialogButtons(flags | 0).forEach(function (entry) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = entry[0];
+      button.addEventListener("click", function () {
+        engineDialogs[token].result = entry[1];
+      });
+      row.appendChild(button);
+    });
+    panel.appendChild(title);
+    panel.appendChild(body);
+    panel.appendChild(row);
+    node.appendChild(panel);
+    (document.querySelector(".player-stage") || document.body).appendChild(node);
+    engineDialogs[token] = { result: 0, node: node };
+    return token;
+  };
+  window.krkr2webDialogPoll = function (token) {
+    var dialog = engineDialogs[token];
+    if (!dialog) { return -2; }
+    return dialog.result > 0 ? dialog.result : -1;
+  };
+  window.krkr2webDialogDismiss = function (token) {
+    var dialog = engineDialogs[token];
+    if (!dialog) { return; }
+    delete engineDialogs[token];
+    if (dialog.node.parentNode) { dialog.node.parentNode.removeChild(dialog.node); }
+  };
   window.krkr2webEngineQuit = function () {
     // the engine terminated itself (game exit / System shutdown): stop the
     // session cleanly instead of letting the watchdog flag it as stalled

@@ -213,6 +213,7 @@
     "patches/0074-web-touch-multi-finger.patch",
     "patches/0075-k2compat-touchmouse-shim.patch",
     "patches/0076-motionplayer-psb-krkr-order-textures.patch",
-    "patches/0077-web-graphic-load-timing.patch"
+    "patches/0077-web-graphic-load-timing.patch",
+    "patches/0078-win32dialog-messagebox-page-ask.patch"
   ]
 }

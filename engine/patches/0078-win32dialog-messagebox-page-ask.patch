@@ -1,0 +1,126 @@
+# krkr2web: real answers for the win32dialog shim's messageBox. The game's
+# PanicAskYesNo branch is driven by WIN32Dialog.messageBox's return value;
+# the previous canned IDNO silently cancelled every confirm (game exit never
+# reached shutdown, so the page never returned to the library; replay-quit
+# and scene-skip confirms were equally dead). A new global TJS function
+# krkr2webAskMessageBox(text, caption, flags) asks the host page via
+# window.krkr2webDialogAsk/Poll/Dismiss and Asyncify-waits (100ms slices,
+# 180s cap); without a page hook it returns -1 and the shim keeps its
+# previous default-answer fallback.
+diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -491,6 +491,89 @@ tTVPAtExit TVPDestroyPluginVectorAtExit
+ 	(TVP_ATEXIT_PRI_RELEASE, TVPDestroyPluginVector);
+ #endif
+ //---------------------------------------------------------------------------
++//---------------------------------------------------------------------------
++// krkr2web: native bridge behind the win32dialog shim's messageBox. The
++// game's PanicAskYesNo (exit confirm, replay-quit confirm, scene-skip
++// confirms) calls WIN32Dialog.messageBox synchronously and branches on the
++// answer; a canned IDNO silently cancelled every one of them (the engine
++// then never exits and the page never returns to the library). This
++// function asks the host page to show a real dialog and Asyncify-waits for
++// the answer via window.krkr2webDialogAsk/Poll/Dismiss; no hook or timeout
++// yields -1 and the shim falls back to its previous default answer.
++class tKrkr2WebAskMessageBox final : public tTJSNativeFunction {
++public:
++	tKrkr2WebAskMessageBox() :
++		tTJSNativeFunction(TJS_W("krkr2webAskMessageBox")) {}
++
++private:
++	tjs_error Process(tTJSVariant *result, tjs_int numparams,
++		tTJSVariant **param, iTJSDispatch2 *) override {
++		tjs_int answer = -1;
++		if(numparams >= 3 && param[0] && param[1] && param[2]) {
++			const ttstr text(*param[0]);
++			const ttstr caption(*param[1]);
++			const tjs_int flags = (tjs_int)param[2]->AsInteger();
++			answer = AskPage(text.AsNarrowStdString().c_str(),
++				caption.AsNarrowStdString().c_str(), flags);
++		}
++		if(result)
++			*result = tTJSVariant(answer);
++		return TJS_S_OK;
++	}
++
++	static tjs_int AskPage(const char *text, const char *caption,
++		tjs_int flags);
++};
++
++#if defined(__EMSCRIPTEN__)
++#	include <emscripten.h>
++tjs_int tKrkr2WebAskMessageBox::AskPage(const char *text,
++	const char *caption, tjs_int flags) {
++	const int token = EM_ASM_INT(
++		{
++			if(typeof window == 'undefined' || !window.krkr2webDialogAsk)
++				return -1;
++			return window.krkr2webDialogAsk(UTF8ToString($0),
++				UTF8ToString($1), $2) | 0;
++		},
++		text, caption, flags);
++	if(token < 0)
++		return -1;
++	for(int i = 0; i < 1800; ++i) {  // 1800 * 100ms = 180s cap
++		emscripten_sleep(100);
++		const int polled = EM_ASM_INT(
++			{
++				if(typeof window == 'undefined' || !window.krkr2webDialogPoll)
++					return -2;
++				return window.krkr2webDialogPoll($0) | 0;
++			},
++			token);
++		if(polled >= 0) {
++			EM_ASM(
++				{
++					if(window.krkr2webDialogDismiss)
++						window.krkr2webDialogDismiss($0);
++				},
++				token);
++			return polled;
++		}
++		if(polled == -2)
++			break;
++	}
++	EM_ASM(
++		{
++			if(window.krkr2webDialogDismiss)
++				window.krkr2webDialogDismiss($0);
++		},
++		token);
++	return -1;
++}
++#else
++tjs_int tKrkr2WebAskMessageBox::AskPage(const char *, const char *, tjs_int) {
++	return -1;
++}
++#endif
++
+ static bool TVPPluginLoading = false;
+ void TVPLoadPlugin(const ttstr & name)
+ {
+@@ -2409,6 +2492,9 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+ 			TJS_W("} ")
+ 			TJS_W("KRKR2WebWIN32Dialog.SolidBrush = KRKR2WebWin32SolidBrush; ")
+ 			TJS_W("KRKR2WebWIN32Dialog.messageBox = function (owner, text, caption, flags) { ")
++			TJS_W("var answer = -1; ")
++			TJS_W("try { if (global.krkr2webAskMessageBox !== void) answer = global.krkr2webAskMessageBox('' + text, '' + caption, flags); } catch(e) { answer = -1; } ")
++			TJS_W("if (answer >= 0) return answer; ")
+ 			TJS_W("return (flags & 4) != 0 ? KRKR2WebWIN32Dialog.IDNO : KRKR2WebWIN32Dialog.IDOK; ")
+ 			TJS_W("}; ")
+ 			TJS_W("KRKR2WebWIN32Dialog.chooseColor = function (owner, info) { ")
+@@ -2419,6 +2505,15 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+ 			,
+ 			TJS_W("krkr2web-win32dialog-shim"), 0);
+ 		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_PLUGIN_SHIM win32dialog.dll"));
++		{
++			tKrkr2WebAskMessageBox *ask = new tKrkr2WebAskMessageBox();
++			if(!TVPRegisterGlobalObject(TJS_W("krkr2webAskMessageBox"), ask))
++				TVPAddImportantLog(
++					TJS_W("KRKR2WEB_WIN32DIALOG ask-register failed"));
++			ask->Release();
++		}
+ 	}
+ 	else if(name == TJS_W("k2compat.dll") || name == TJS_W("kztouch.dll"))
+ 	{
