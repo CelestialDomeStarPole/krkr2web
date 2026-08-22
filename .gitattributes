@@ -1,0 +1,26 @@
+# 跨平台统一的文本/二进制与行尾策略。
+#   - 仓库内统一 LF 存储（text=auto），检出行为交由各端 core.autocrlf；
+#   - 补丁必须保持 LF：apply_patch.py 与上游源码的 CRLF 兼容逻辑按 LF 补丁
+#     设计，CRLF 补丁在部分上下文会失配（见 docs/06 排障手册）；
+#   - BOM（如含中文的 .ps1）属于文件内容，git 不做处理。
+* text=auto
+
+*.patch text eol=lf
+*.md text
+*.json text
+*.js text
+*.css text
+*.html text
+*.py text
+*.ps1 text
+*.sh text
+*.yml text
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.wasm binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
