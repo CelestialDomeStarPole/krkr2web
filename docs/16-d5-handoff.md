@@ -42,6 +42,16 @@
 （补丁 0076：PSB 纹理字节序本就是 krkr 序，删除上游多余的
 TVPReverseRGB；repro 与真游戏双验证，详见 15 号文档文末）。
 
+2026-08-22 修复**游戏正常退出不回游戏库**（补丁 0078 + player 对话框
+钩子）：win32dialog shim 的 messageBox 恒答 IDNO，游戏 PanicAskYesNo
+（退出/回想退出/场景跳转确认）全部被静默否决，shutdown 链走不到
+krkr2webEngineQuit。现在 TJS 全局 `krkr2webAskMessageBox` 经 Asyncify
+轮询页面模态对话框（krkr2webDialogAsk/Poll/Dismiss，MB_YESNO 渲染
+是/否），无钩子（worker 变体）/超时回落旧默认答案。本地三层验证
+（repro 桥全对、真游戏页对话框渲染/应答、engine-quit 回库）已过，
+已部署 443，**待实机确认**：游戏内退出 → 弹"終了しますか？"→ 点
+"是" → 自动回游戏库。详见 15 号文档文末章节。
+
 根因链与 TJS 语言陷阱
 （无词法闭包、TouchMouse 的 owner 即 kag）详见
 [15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。
@@ -54,7 +64,8 @@ TVPReverseRGB；repro 与真游戏双验证，详见 15 号文档文末）。
    70-100ms、25 张图约 2.5s——大头不在 WebP，疑在 PSB 物化/XP3 解压
    突发，下轮取真实窗口构成清单后定方案；
 2. worker 变体桌面黑屏 bug：本地 headless 必现、headed 正常；实机走
-   baseline 变体不受影响（低优先）。
+   baseline 变体不受影响（低优先）。另 worker 变体的 messageBox
+   无 window，自动回落默认答案（桌面调试路径可接受）。
 
 Logo 蓝色问题已于 2026-08-21 修复（补丁 0076，PSB 纹理 R/B 交换，
 详见 [15-d5-compat-status.md](15-d5-compat-status.md) 文末章节）。
@@ -270,6 +281,7 @@ EventName 一起打出来（ttstr 是 UTF-16，需要转窄或用 TVPUtf16ToUtf8
 | engine/patches/0035-emscripten-input-path.patch | 鼠标/键盘输入断点修复（历史核心） |
 | engine/patches/0074-web-touch-multi-finger.patch | 触摸多点投递（touchPointCount 查询族） |
 | engine/patches/0075-k2compat-touchmouse-shim.patch | TouchMouse 垫片（双指点按=右键） |
+| engine/patches/0078-win32dialog-messagebox-page-ask.patch | messageBox 页面对话框桥（退出确认真应答） |
 | engine/plugins/layerExDraw.cpp | stub（勿注册 clear） |
 | tools/apply_patch.py | Python 补丁应用器 |
 | tools/build_d3.ps1 | 构建流水线 |

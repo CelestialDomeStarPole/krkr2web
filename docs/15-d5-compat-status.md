@@ -659,3 +659,45 @@ KRKR2WEB_D5_LOAD ms/bytes/name 计时日志（>=50ms），并实测：8MB WebP
 (150,770) = 鉴赏（历史实证）；"新游戏/最初から"具体 y 未命中
 （试过 575/338 均点空），下轮可从 flowchart 页面的场景节点直接进入
 场景加载窗口取数。
+
+## 游戏正常退出不回游戏库修复（2026-08-22，补丁 0078）
+
+实机症状：游戏内正常退出后引擎空转，页面停在游戏视图，需手动工具栏
+停止（诊断 stopReason=player-toolbar；引擎日志走到 end.ks *end_hook 后
+无下文）。
+
+根因（反汇编 + 源码双证）：退出链 close → onCloseQuery → PanicAskYesNo
+（.tmp/yuzu_system.tjs:541）调 `WIN32Dialog.messageBox(...) == IDYES`
+决定是否执行 onCloseYes；web shim 的 messageBox 恒返回 IDNO → 退出
+确认（終了しますか？）、回想退出（AskQuitReplay）、场景跳转确认
+（AskBackOne/NextScn/PrevScn）全部被静默答"否"，shutdown 链从未走到
+krkr2webEngineQuit。
+
+修复三件套：
+- **补丁 0078**（PluginImpl.cpp win32dialog 分支）：注册 TJS 全局
+  `krkr2webAskMessageBox(text, caption, flags)`——C++ tTJSNativeFunction，
+  EM_ASM 调 `window.krkr2webDialogAsk(...)` 取 token，Asyncify 循环
+  `emscripten_sleep(100)` + `krkr2webDialogPoll(token)`（1800 次上限 =
+  180s）；拿到答案后 dismiss 并返回 IDYES/IDNO/IDOK。无页面钩子
+  （如 worker 变体）或超时返回 -1，TJS 垫片 messageBox 回落原默认答案
+  （MB_YESNO → IDNO），与旧行为完全兼容。
+- **player.js**：页面模态对话框三钩子（`.player-stage` 下
+  `.engine-dialog`，MB_YESNO 渲染 是/否，否则单个 确定；点击写结果，
+  poll 未答返回 -1、对话框已删返回 -2）；styles.css 配套样式。
+- 全局函数注册用引擎自带 `TVPRegisterGlobalObject`（iTJSDispatch2
+  无 PropAdd，首轮构建教训）。
+
+验证（本地三层）：
+1. logo repro（真引擎 wasm + 自动应答钩子走真实轮询路径）：
+   `ASKTEST bridge=Object yes=6 no=7 ok=1`、`shimYes=6`（完整 shim 路径）；
+   无标记文本回落 IDNO（box=7）不变。
+2. 真游戏页面（8766 产品 + Playwright）：对话框渲染（title=確認、
+   text=終了しますか？、按钮 是/否）、点击前 poll=-1、点"是"=6、
+   点"确定"=1、dismiss 后 DOM 移除。
+3. engine-quit 回库复核：页面侧直接触发 krkr2webEngineQuit →
+   stopReason=engine-quit、库页面可见。
+
+游戏内 UI 触发段（标题菜单 → 終了 → 确认）本地 headless 无法视觉
+定位（canvas 黑屏），由实机验证覆盖——实机诊断已证明该链触发过
+（引擎空转即确认被 IDNO 拦截的直接后果），修复后同一操作应弹页面对
+话框。部署 443（?v=50dfe944 引擎 / ?v=5411f2a0 player）待实机确认。
