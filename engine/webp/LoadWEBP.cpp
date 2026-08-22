@@ -9,6 +9,57 @@
 // WebP graphic loader adapted for krkrsdl2's graphic loader API (3-arg size
 // callback + per-scanline scanline callback). Original: kirikiroid2-web LoadWEBP.cpp.
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+// krkr2web: off-main-thread WebP decode. wasm libwebp needs 40-100ms per
+// 720p-class image ON the main thread - long enough to starve the OpenAL
+// scheduler (25ms interval, 100ms lookahead) and drop audio on every
+// click-next sprite swap. The page's decoder (play/prefetch.js) decodes via
+// createImageBitmap inside a worker, i.e. on the browser's native decoder
+// threads; the engine Asyncify-suspends in the await below, so the JS event
+// loop (audio scheduling, input) keeps running.
+//
+// Two phases keep the destination pointer safe: phase 1 awaits the decode
+// and reports the dimensions; phase 2 performs the synchronous copy. No
+// suspension happens between the phases, so no other callback can run wasm
+// code (and grow the heap) in between.
+EM_ASYNC_JS(int, krkr2web_webp_request, (int bgra, const unsigned char *src, int len, int w, int h),
+{
+	const decoder = globalThis.krkr2webImageDecoder;
+	if (!decoder || typeof decoder.decode != 'function') return 0;
+	try {
+		const bytes = HEAPU8.slice(src, src + len);
+		const info = await decoder.decode('', bytes, bgra != 0);
+		if (!info || !info.rgba || info.w != w || info.h != h) return 0;
+		decoder.pending = { rgba: info.rgba };
+		return ((info.w & 0xffff) << 16) | (info.h & 0xffff);
+	} catch (e) { return 0; }
+});
+
+EM_JS(int, krkr2web_webp_take, (unsigned char *out, int cap),
+{
+	const decoder = globalThis.krkr2webImageDecoder;
+	if (!decoder || !decoder.pending || !decoder.pending.rgba) return 0;
+	const rgba = decoder.pending.rgba;
+	decoder.pending = null;
+	if (rgba.length > cap) return 0;
+	HEAPU8.set(rgba, out);
+	return rgba.length;
+});
+
+static bool Krkr2WebDecodeOffThread(bool bgra,
+	const unsigned char *src, size_t len, int w, int h,
+	unsigned char *out, size_t cap)
+{
+	const int packed = krkr2web_webp_request(bgra ? 1 : 0, src,
+		(int)len, w, h);
+	if(packed == 0) return false;
+	const int copied = krkr2web_webp_take(out, (int)cap);
+	return copied == (int)cap;
+}
+#endif
+
 void TVPLoadWEBP(void *formatdata, void *callbackdata,
                  tTVPGraphicSizeCallback sizecallback,
                  tTVPGraphicScanLineCallback scanlinecallback,
@@ -34,14 +85,21 @@ void TVPLoadWEBP(void *formatdata, void *callbackdata,
         std::unique_ptr<uint8_t[]> out(new uint8_t[stride * h]);
         // KRKR's normal 32-bit bitmap layout is BGRA. glmNormalRGBA is the
         // explicit RGBA exception used by callers that request channel order.
-        config.output.colorspace =
-            mode == glmNormalRGBA ? MODE_RGBA : MODE_BGRA;
-        config.output.u.RGBA.rgba = out.get();
-        config.output.u.RGBA.stride = stride;
-        config.output.u.RGBA.size = stride * h;
-        config.output.is_external_memory = 1;
-        if(WebPDecode(data.get(), datasize, &config) != VP8_STATUS_OK)
-            TVPThrowExceptionMessage(TJS_W("Invalid WebP image(RGBA mode)"));
+        bool decoded = false;
+#ifdef __EMSCRIPTEN__
+        decoded = Krkr2WebDecodeOffThread(mode != glmNormalRGBA,
+            data.get(), (size_t)datasize, w, h, out.get(), (size_t)stride * h);
+#endif
+        if(!decoded) {
+            config.output.colorspace =
+                mode == glmNormalRGBA ? MODE_RGBA : MODE_BGRA;
+            config.output.u.RGBA.rgba = out.get();
+            config.output.u.RGBA.stride = stride;
+            config.output.u.RGBA.size = stride * h;
+            config.output.is_external_memory = 1;
+            if(WebPDecode(data.get(), datasize, &config) != VP8_STATUS_OK)
+                TVPThrowExceptionMessage(TJS_W("Invalid WebP image(RGBA mode)"));
+        }
 
         for(int y = 0; y < h; y++) {
             void *scanline = scanlinecallback(callbackdata, y);

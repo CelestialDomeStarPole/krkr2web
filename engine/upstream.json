@@ -214,6 +214,9 @@
     "patches/0075-k2compat-touchmouse-shim.patch",
     "patches/0076-motionplayer-psb-krkr-order-textures.patch",
     "patches/0077-web-graphic-load-timing.patch",
-    "patches/0078-win32dialog-messagebox-page-ask.patch"
+    "patches/0078-win32dialog-messagebox-page-ask.patch",
+    "patches/0079-web-xp3-prefetch-park.patch",
+    "patches/0080-web-graphic-park-fast-path.patch",
+    "patches/0081-web-audio-cushion-cache-bump.patch"
   ]
 }

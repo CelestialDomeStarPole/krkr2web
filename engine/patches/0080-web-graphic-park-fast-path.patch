@@ -1,0 +1,129 @@
+# krkr2web: graphic load fast path from the page's prefetched decode park.
+#
+# The click-next sprite/background swap used to pay, on the main thread:
+# archive read + inflate + a 40-100ms wasm libwebp decode. With the page's
+# prefetch pipeline (play/prefetch.js), predicted WebP storages are already
+# decoded into BGRA by the browser's native decoder in a worker; this patch
+# lets the graphic loader consume that park directly - one probe and one
+# memcpy, no archive IO at all. The park check runs before the stream holder
+# because the existing 16-byte WebP magic sniff would otherwise force the
+# first segment read + inflate before the park could even be consulted.
+#
+# Unparked images keep the existing path; LoadWEBP.cpp separately hands
+# those to the native decoder via Asyncify suspension (no main-thread
+# decode), falling back to wasm libwebp when the page provides no decoder.
+diff --git a/external/krkrz/visual/GraphicsLoaderIntf.cpp b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+--- a/external/krkrz/visual/GraphicsLoaderIntf.cpp
++++ b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+@@ -1552,6 +1552,86 @@ bool TVPHasImageCache( const ttstr& nname, tTVPGraphicLoadMode mode, tjs_uint dw
+ 	return false;
+ }
+ //---------------------------------------------------------------------------
++#if defined(TVP_COMPILING_KRKRSDL2) && defined(__EMSCRIPTEN__)
++#include <emscripten.h>
++#include <memory>
++#include <cstring>
++
++// krkr2web: fill the destination bitmap from the page's prefetched decode
++// park (play/prefetch.js). Returns false when the page holds no decode for
++// this storage (or evicted it between probe and copy), in which case the
++// caller falls back to the regular stream + loader path.
++static bool Krkr2WebFillFromPark(tTVPBaseBitmap *dest, const ttstr &name,
++	tTVPGraphicLoadMode mode, tTVPGraphicSizeCallback sizecallback,
++	tTVPGraphicScanLineCallback scanlinecallback, void *callbackdata)
++{
++	if(name.IsEmpty()) return false;
++	ttstr key(name);
++	tTVPArchive::NormalizeInArchiveStorageName(key);
++	std::string narrow = key.AsNarrowStdString();
++	const int packed = EM_ASM_INT(
++		{
++			const park = globalThis.krkr2webImagePark;
++			if (!park || typeof park.probe != 'function') return 0;
++			try {
++				const info = park.probe(UTF8ToString($0));
++				if (!info || !(info.w > 0) || !(info.h > 0)) return 0;
++				return ((info.w & 0xffff) << 16) | (info.h & 0xffff);
++			} catch (e) { return 0; }
++		},
++		narrow.c_str());
++	if(packed == 0) return false;
++	const tjs_uint w = (tjs_uint)((packed >> 16) & 0xffff);
++	const tjs_uint h = (tjs_uint)(packed & 0xffff);
++
++	sizecallback(callbackdata, w, h);
++	const size_t stride = (size_t)w * 4;
++	std::unique_ptr<uint8_t[]> out(new uint8_t[stride * h]);
++	const int copied = EM_ASM_INT(
++		{
++			const park = globalThis.krkr2webImagePark;
++			if (!park || typeof park.read != 'function') return 0;
++			try {
++				const px = park.read(UTF8ToString($0));
++				if (!px) return 0;
++				const bytes = px.rgba.length;
++				if (bytes > $2) return 0;
++				HEAPU8.set(px.rgba, $1);
++				return bytes;
++			} catch (e) { return 0; }
++		},
++		narrow.c_str(), out.get(), (int)(stride * h));
++	if(copied != (int)(stride * h))
++		return false;  // evicted between probe and copy; regular path reloads
++
++	if(mode == glmNormalRGBA)
++	{
++		// the park stores BGRA (krkr layout); the explicit RGBA mode wants a swap
++		uint32_t *pixels = (uint32_t *)out.get();
++		const size_t count = stride * h / 4;
++		for(size_t i = 0; i < count; i++)
++		{
++			const uint32_t p = pixels[i];
++			pixels[i] = (p & 0xff000000u) | ((p & 0xffu) << 16) |
++				(p & 0xff00u) | ((p & 0xff0000u) >> 16);
++		}
++	}
++	for(tjs_uint y = 0; y < h; y++)
++	{
++		void *scanline = scanlinecallback(callbackdata, (tjs_int)y);
++		if(!scanline) break;
++		memcpy(scanline, out.get() + (size_t)y * stride, stride);
++		scanlinecallback(callbackdata, -1);
++	}
++	return true;
++}
++#endif
++//---------------------------------------------------------------------------
+ static bool TVPInternalLoadGraphic(tTVPBaseBitmap *dest, const ttstr &_name,
+ 	tjs_uint32 keyidx, tjs_uint desw, tjs_int desh, std::vector<tTVPGraphicMetaInfoPair> * * MetaInfo,
+ 		tTVPGraphicLoadMode mode, ttstr *provincename, bool unpadding=false)
+diff --git a/external/krkrz/visual/GraphicsLoaderIntf.cpp b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+--- a/external/krkrz/visual/GraphicsLoaderIntf.cpp
++++ b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+@@ -1644,6 +1643,19 @@ static bool TVPInternalLoadGraphic(tTVPBaseBitmap *dest, const ttstr &_name,
+ #ifdef TVP_COMPILING_KRKRSDL2
+ 	{
++		bool krkr2webParkLoaded = false;
++#ifdef __EMSCRIPTEN__
++		// krkr2web: predicted storages may already hold a decoded park on the
++		// page; consuming it skips the archive stream (and the magic sniff's
++		// forced first-segment read) entirely
++		if(mode == glmNormal || mode == glmNormalRGBA)
++		{
++			krkr2webParkLoaded = Krkr2WebFillFromPark(dest, name, mode,
++				TVPLoadGraphic_SizeCallback, TVPLoadGraphic_ScanLineCallback,
++				(void *)&data);
++		}
++#endif
++		if(!krkr2webParkLoaded)
++		{
+ 		// krkr2web ADR-008: the game stores WebP with .png/.jpg/.tlg extensions.
+ 		uint8_t webp_header[16];
+ 		tjs_uint64 webp_pos = holder.Get()->GetPosition();
+@@ -1665,6 +1677,8 @@ static bool TVPInternalLoadGraphic(tTVPBaseBitmap *dest, const ttstr &_name,
+ 				TVPLoadGraphic_ScanLineCallback, TVPLoadGraphic_MetaInfoPushCallback,
+ 				holder.Get(), keyidx, mode);
+ 		}
++		}
+ 	}
+ #endif

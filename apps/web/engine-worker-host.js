@@ -118,6 +118,7 @@
       lastMessageAt: this.lastMessageAt,
       dependencies: this.dependencies,
       storage: this.storageSnapshot,
+      prefetch: this.prefetchSnapshot,
       audio: this.audioContext ? {
         state: this.audioContext.state,
         sampleRate: this.audioContext.sampleRate,
@@ -497,6 +498,8 @@
       this.emit("storage-ready", message.snapshot);
     } else if (message.type === "saves-ready") {
       this.emit("saves-ready", message);
+    } else if (message.type === "prefetch-stats") {
+      this.prefetchSnapshot = message.prefetch || null;
     } else if (message.type === "heartbeat") {
       this.lastHeartbeatAt = Number(message.at || Date.now());
       this.emit("heartbeat", message);

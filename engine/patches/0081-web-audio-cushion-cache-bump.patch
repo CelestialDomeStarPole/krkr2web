@@ -1,0 +1,48 @@
+# krkr2web: audio scheduling cushion + larger default graphic cache.
+#
+# Emscripten's OpenAL schedules WebAudio buffers from a 25ms main-thread
+# interval with a 100ms lookahead. Even with image decoding moved off the
+# main thread, transient hitches (30Hz transition blends, TJS bursts) can
+# exceed the lookahead and cut voices mid-word. Raising the lookahead to
+# 250ms keeps already-scheduled audio playing through short hitches; stop /
+# seek latency grows by the same bound, which stays imperceptible for VN
+# playback semantics.
+#
+# The graphic cache default grows 128 -> 160 MiB: revisit-heavy scenes
+# (title, menus, repeated backgrounds) then stay decoded in the heap, and
+# the wasm heap ceiling (1 GiB) still leaves ample headroom for the motion
+# player's PSB textures.
+diff --git a/src/core/base/sdl2/SysInitImpl.cpp b/src/core/base/sdl2/SysInitImpl.cpp
+--- a/src/core/base/sdl2/SysInitImpl.cpp
++++ b/src/core/base/sdl2/SysInitImpl.cpp
+@@ -10,7 +10,10 @@
+ #include "tjsCommHead.h"
+ 
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
+ #include "FilePathUtil.h"
+ #if 0
+@@ -1527,13 +1527,24 @@
+ 	// the audio queue on low-end devices. Enable a conservative fixed-size
+ 	// cache unless -gclim requested otherwise.
+ 	if(TVPGraphicCacheSystemLimit == 0)
+-		TVPGraphicCacheSystemLimit = 128 * 1024 * 1024;
++		TVPGraphicCacheSystemLimit = 160 * 1024 * 1024;
+ 	if(TVPGetGraphicCacheLimit() == 0)
+ 		TVPSetGraphicCacheLimit(TVPGraphicCacheSystemLimit);
+ 	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_GRAPHIC_CACHE ")) +
+ 		ttstr((tjs_int)(TVPGraphicCacheSystemLimit / (1024 * 1024))));
++	// krkr2web: widen the OpenAL scheduling lookahead. The default 100ms is
++	// shorter than a single transition blend frame on weak devices, so any
++	// main-thread hitch cut the currently playing voice; 250ms rides out
++	// transient hitches without audible stops (stop/seek latency grows by
++	// the same bound, imperceptible for VN playback).
++	EM_ASM(
++		{
++			if (typeof AL !== 'undefined' && AL.QUEUE_LOOKAHEAD < 0.25) {
++				AL.QUEUE_LOOKAHEAD = 0.25;
++			}
++		});
+ #endif

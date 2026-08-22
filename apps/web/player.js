@@ -488,6 +488,8 @@
       stopReason: stopReason,
       href: location.href,
       storage: moduleInstance && moduleInstance.storageSnapshot || storageBridge.snapshot(),
+      prefetch: window.krkr2webPrefetch && typeof window.krkr2webPrefetch.snapshot === "function"
+        ? window.krkr2webPrefetch.snapshot() : null,
       workerRuntime: moduleInstance && typeof moduleInstance.snapshot === "function" ? moduleInstance.snapshot() : null,
       wasmMemoryBytes: moduleInstance && moduleInstance.HEAPU8 ? moduleInstance.HEAPU8.buffer.byteLength : null,
       audio: {
@@ -569,6 +571,11 @@
     closeAudioContext(instance);
     window.krkr2webVideoStop();
     if (storageBridge.releaseAll) { storageBridge.releaseAll(); }
+    // cancel queued prefetches for the dying engine instance (parks stay:
+    // they are keyed by content address and remain valid across restarts)
+    if (window.krkr2webPrefetch && typeof window.krkr2webPrefetch.cancelAll === "function") {
+      try { window.krkr2webPrefetch.cancelAll(); } catch (error) {}
+    }
     if (moduleInstance === instance) { moduleInstance = null; }
     window.Module = null;
     ready = false;
@@ -759,6 +766,7 @@
           engineScriptUrl: "/engine/krkrsdl2.js",
           wasmUrl: engineVariant.wasmUrl,
           storageScriptUrl: "/play/storage.js",
+          prefetchScriptUrl: "/play/prefetch.js",
           factoryName: engineVariant.factory,
           wasmBinary: wasmBinary,
           audioContext: audioContext,

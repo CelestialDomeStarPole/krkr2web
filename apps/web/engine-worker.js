@@ -589,6 +589,25 @@
     await storage.prepare(currentGameId);
     send("storage-ready", { snapshot: storage.snapshot ? storage.snapshot() : null });
 
+    // krkr2web: the prefetch pipeline (inflate pool, parks, native decoder
+    // workers) must live in the SAME global scope as the engine module, so
+    // its bridges (globalThis.krkr2webPrefetch / ImagePark / ImageDecoder /
+    // InflatePool) resolve inside this worker. Failure is non-fatal: the
+    // engine falls back to its per-segment worker and wasm libwebp.
+    try {
+      var prefetchScriptUrl = message.prefetchScriptUrl || "/play/prefetch.js";
+      documentTarget.currentScript = { src: prefetchScriptUrl };
+      importScripts(prefetchScriptUrl);
+      if (self.krkr2webPrefetch && typeof self.krkr2webPrefetch.bindStorage === "function") {
+        // rebind the pipeline's storage handle to the worker bridge in case
+        // it captured nothing at load time
+        self.krkr2webPrefetch.bindStorage(storage);
+      }
+      send("stdout", { message: "KRKR2WEB_PREFETCH_WORKER_READY" });
+    } catch (prefetchError) {
+      send("stderr", { message: "Prefetch pipeline unavailable: " + errorText(prefetchError) });
+    }
+
     phase = "loading-engine";
     send("phase", { phase: phase });
     var engineScriptUrl = message.engineScriptUrl || "/engine/krkrsdl2.js";
@@ -655,6 +674,13 @@
     send("phase", { phase: phase });
     moduleInstance = await factory(moduleOptions);
     phase = "running";
+    // krkr2web: mirror the prefetch pipeline's counters to the page so the
+    // player snapshot (workerRuntime.prefetch) shows park/prediction health
+    setInterval(function () {
+      if (self.krkr2webPrefetch && typeof self.krkr2webPrefetch.snapshot === "function") {
+        send("prefetch-stats", { prefetch: self.krkr2webPrefetch.snapshot() });
+      }
+    }, 5000);
     if (pendingVideoCompletionSerial &&
         (pendingVideoCompletionSerial === -1 || pendingVideoCompletionSerial === videoSerial)) {
       try { deliverVideoCompletion(); }
@@ -675,6 +701,8 @@
         response(requestId, true, {
           phase: phase,
           gameId: currentGameId,
+          prefetch: self.krkr2webPrefetch && typeof self.krkr2webPrefetch.snapshot === "function"
+            ? self.krkr2webPrefetch.snapshot() : null,
           canvas: engineCanvas ? { width: engineCanvas.width, height: engineCanvas.height } : null
         });
       } else {

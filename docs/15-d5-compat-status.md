@@ -752,6 +752,91 @@ URL 形态字符串加 ?v=，包括 `manifest.files["/engine/krkrsdl2.wasm"]`
 确认 → shutdown → `stopReason=engine-quit`、`forcedStopCount=0`
 （对照上轮死亡诊断 forcedStopCount=2 工具栏强停），页面正常回库。
 
+## 点击下一步性能优化（2026-08-22 三轮，补丁 0079/0080/0081）
+
+实机症状：普通安卓手机点击"下一步"时音频断续 + 立绘切换卡顿，
+桌面浏览器无明显卡顿。根因梳理（全部主线程串行）：
+
+1. **WebP 解码在主线程跑 wasm libwebp**：720p 级图像 40-100ms/张；
+   OpenAL 调度是主线程 25ms interval + **100ms lookahead**——任何
+   超过 lookahead 的停顿都会掐掉正在播放的语音（爆音的直接机制）。
+2. **每个 XP3 段解压都新建再销毁一个 Worker**（0006 旧实现）：
+   每段 5-15ms 启动开销，一次点击多次触发。
+3. **段缓存只有 1MiB**：脚本/语音段几乎每次都未命中。
+4. **语音打开走完整冷路径**：IDB 块读取（Asyncify 挂起）→ Worker
+   解压 → Vorbis 头解析 → 首批 125ms 单元解码，全部串在点击帧里。
+
+### 方案：预取流水线 + 原生解码搬离主线程
+
+约束回顾：目标 WebView 89 无 SharedArrayBuffer/跨源隔离/wasm SIMD
+（见 worker-runtime-contract.json），引擎必须单线程——并行只能来自
+**浏览器原生多线程**（专用 Worker + createImageBitmap 内部解码线程池）
+与**时间转移**（用户读字时预取）。
+
+- **0079（XP3 通知/预测/段公园/段缓存）**：每次档案流创建通知页面
+  （规范化名 + 段表）；引擎对尾号数字的存储做 **+1/+2 数字后继预测**
+  （语音库与编号 CG 的通用命名规律），预测打开只走流构造（零 IO），
+  页面据此提前拉取；EnsureSegment 先查页面**段公园**（已解压字节）
+  命中即一次 memcpy；段缓存 1MiB→16MiB（单段 4MiB）。
+- **0080（图形公园快路径）**：TVPInternalLoadGraphic 在打开档案流
+  **之前**先问页面有没有该存储的已解码 BGRA（公园命中 = 一次探测 +
+  一次 memcpy，零 IO 零解码）；必须在 16 字节 WebP 魔数嗅探之前，
+  否则嗅探本身就会强制首段读取+解压。
+- **LoadWEBP.cpp（项目自有）**：未命中公园的 WebP 走**异步原生解码**——
+  两阶段（请求→等待尺寸；同步取回→memcpy），引擎 Asyncify 挂起期间
+  主线程空闲（音频调度/输入不受影响），失败回落 wasm libwebp。
+- **0006（改写）**：持久化解压 Worker 池（`krkr2webInflatePool`），
+  规模 = min(4, max(2, 核数-2))；无池时保留旧的逐次 Worker 兜底。
+- **0081**：OpenAL QUEUE_LOOKAHEAD 100ms→250ms（瞬时抖动不再掐音）；
+  图形缓存默认 128→160MiB。
+- **页面（play/prefetch.js 新增）**：解压池 + 解码 Worker
+  （createImageBitmap + OffscreenCanvas，WebGL readPixels 直通 alpha，
+  失败回落 2D getImageData）+ 双公园（段 24MiB/图像 48MiB LRU，
+  按设备内存分层）+ 预取调度（并发 2、20s 超时、引擎代际取消）。
+  storage.js 增加 `readRange/prefetchRange`（与引擎共享块 LRU——
+  预取读过的块，引擎后续读取必命中）；块缓存分层 32/64/128 →
+  64/128/256MiB。
+- player.js 终止时 `cancelAll`（公园按内容寻址跨重启保留）、
+  snapshot 增加 prefetch 指标；check_d4_artifacts 纳入 prefetch.js
+  存在性与语法门禁。
+
+### 预期与观测
+
+点击路径各层成本变为：语音（预测命中）= 段公园 memcpy + 头解析
+（约 2-5ms）；WebP（预测命中）= 公园 memcpy（约 2-3ms）；WebP
+（首见）= 挂起式原生解码（主线程仅 ~2ms 拷贝）；音频不再因解码
+停顿断续。诊断报告 `snapshot().prefetch.metrics` 提供
+notifyOpens/predictedOpens/prefetchedFiles/segmentParkHits/imageParkHits/
+nativeDecodes 计数与公园水位，配合 PERF 直方图可验证。
+
+### 本地验证（2026-08-22，本地 8766 + Playwright 剧情点击）
+
+真游戏全流程（标题 → 新游戏 → 序章剧情连点 30-60 行）：
+
+- **语音预取全命中**：predictedOpens=30 → prefetchedFiles=30 →
+  segmentParkHits=30（14.5MB 语音段零 IDB 读取零解压直达引擎）；
+  标题待机语音 murasame_senren1 → senren1_2 → senren1_3 预测链
+  逐条提前命中，序章 EV CG ev001_01..05 / ev002_01→02 同样命中。
+- **原生解码取代主线程 wasm 解码**：nativeDecodes=128，
+  decodeFailures=0，wasmFallbacks=0——全部 WebP 经浏览器原生解码器
+  在解码 Worker 内完成，主线程仅剩 memcpy。
+- **点击推进帧间隔**（音频断流代理指标，>100ms 即会掐音）：
+  60 次点击仅 3 次 >80ms 采样、max=58ms、p90=44ms——全部低于
+  100ms 断流线；PERF 直方图 avg 4-7ms、稳态窗口 max ≤ 18ms、
+  heap 稳定（294MB 平台）。
+- **无回归**：零 errors、零致命弹窗、退出/重启路径未触碰；
+  KRKR2WEB_D5_GRAPHIC_CACHE 160 生效。
+- 已知边界：430ms 快速连点时 8MB EV CG 的图像公园解码来不及
+  完成（预取约需 1s），未命中公园回落挂起式原生解码——依然无
+  主线程卡顿；真实读字节奏（2-5s/行）下公园命中率会显著更高。
+- 排查工具沉淀（gitignored）：`.tmp/perf-drive.js`（画布分数坐标
+  harness）、`.tmp/probe-prefetch.js`（新游戏剧情点击探针）；桌面
+  验证须 route 屏蔽 `engine-worker-host.js?*`（含 ?v= 戳）强制
+  baseline 变体，否则命中桌面 worker 黑屏 bug（既往结论）。
+
+
+
+
 ### 退出全链路本地复刻（关键发现）
 
 本地（baseline 变体 + Playwright）完整复刻实机退出：标题 → 終了

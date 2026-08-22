@@ -1,0 +1,302 @@
+# krkr2web: XP3 open notification, numeric-successor prediction and a
+# prefetched-segment park, plus a larger in-heap segment cache.
+#
+# Click-next cost on weak Android devices is dominated by the archive read
+# path: the next voice/sprite storage costs an IndexedDB chunk read (an
+# Asyncify suspension), a worker inflate and - for WebP - a main-thread wasm
+# decode. This patch gives the page the information to remove all three
+# before the click happens:
+#
+#  - every archive stream creation notifies the page (normalized name,
+#    storage index, segment table); the page prefetches asynchronously
+#    (chunk warming + background inflate + native WebP pre-decode);
+#  - storages with trailing digits predict their numeric successor (voice
+#    files and numbered CGs are sequences); the prediction opens the
+#    successor stream ctor-only (no IO) so its notify reaches the page two
+#    lines ahead of the click;
+#  - EnsureSegment consults the page's park of pre-inflated segments before
+#    reading+inflating, so a predicted storage open costs one memcpy;
+#  - the wasm-side segment cache grows 1MiB -> 16MiB (per-segment 4MiB) so
+#    the active scenario and recent voices stay hot.
+#
+# All hooks are guarded by globalThis lookups: without the page pipeline
+# (e.g. the standalone D3 probe page) every addition is a no-op.
+diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive.cpp
+--- a/external/krkrz/base/XP3Archive.cpp
++++ b/external/krkrz/base/XP3Archive.cpp
+@@ -662,6 +662,125 @@ tTVPXP3Archive::~tTVPXP3Archive()
+ 	TVPFreeArchiveHandlePoolByPointer(this);
+ }
+ //---------------------------------------------------------------------------
++#ifdef __EMSCRIPTEN__
++// krkr2web: prediction depth guard. Depth 1..2 opens are predictions (their
++// notifies carry the flag that makes the page prefetch); real opens run at 0.
++static int Krkr2WebPredictionDepth = 0;
++
++static void Krkr2WebNotifyOpen(tTVPXP3Archive *owner, tjs_uint idx,
++	const ttstr &item_name,
++	const std::vector<tTVPXP3ArchiveSegment> &segments, bool prediction)
++{
++	// flat segment table for the page: [start, arcsize, orgsize, iscomp] * n
++	std::vector<double> segs;
++	segs.reserve(segments.size() * 4);
++	for(size_t i = 0; i < segments.size(); i++)
++	{
++		const tTVPXP3ArchiveSegment &s = segments[i];
++		segs.push_back((double)s.Start);
++		segs.push_back((double)s.ArcSize);
++		segs.push_back((double)s.OrgSize);
++		segs.push_back(s.IsCompressed ? 1.0 : 0.0);
++	}
++	ttstr key(item_name);
++	tTVPArchive::NormalizeInArchiveStorageName(key);
++	std::string archive = owner->GetName().AsNarrowStdString();
++	std::string name = key.AsNarrowStdString();
++	EM_ASM(
++		{
++			const bridge = globalThis.krkr2webPrefetch;
++			if (!bridge || typeof bridge.notifyOpen != 'function') return;
++			const count = $5 | 0;
++			const segments = [];
++			for (let i = 0; i < count; i++) {
++				const base = ($4 + i * 32) >>> 3;
++				segments.push({
++					start: HEAPF64[base],
++					arc: HEAPF64[base + 1],
++					org: HEAPF64[base + 2],
++					comp: HEAPF64[base + 3] > 0.5
++				});
++			}
++			try { bridge.notifyOpen(UTF8ToString($0), UTF8ToString($1), $2 | 0, $3 != 0, segments); }
++			catch (e) {}
++		},
++		archive.c_str(), name.c_str(), (int)idx, (int)(prediction ? 1 : 0),
++		segs.data(), (int)(segs.size() / 4));
++}
++
++// numeric successor of a normalized storage name: "dir/voice00042" ->
++// "dir/voice00043" (zero padding kept; 999 -> 1000 widens). Voice banks and
++// numbered CG sets follow this convention across KRKR games.
++static bool Krkr2WebPredictSuccessor(const ttstr &name, ttstr &out)
++{
++	const tjs_int len = name.GetLen();
++	if(len <= 0 || len > 260) return false;
++	const tjs_char *p = name.c_str();
++	tjs_int digits = 0;
++	while(digits < len)
++	{
++		const tjs_char c = p[len - digits - 1];
++		if(c >= TJS_W('0') && c <= TJS_W('9')) digits++;
++		else break;
++	}
++	if(digits == 0 || digits > 9) return false;
++	const tjs_int numpos = len - digits;
++	unsigned long long v = 0;
++	for(tjs_int i = numpos; i < len; i++)
++		v = v * 10 + (unsigned long long)(p[i] - TJS_W('0'));
++	v++;
++	tjs_char buf[24];
++	tjs_int vlen = 0;
++	do { buf[vlen++] = TJS_W('0') + (tjs_char)(v % 10); v /= 10; } while(v && vlen < 24);
++	if(vlen > digits) digits = vlen;
++	ttstr result(p, numpos);
++	for(tjs_int i = digits - 1; i >= 0; i--) result += buf[i];
++	out = result;
++	return true;
++}
++#endif
++//---------------------------------------------------------------------------
+ tTJSBinaryStream * tTVPXP3Archive::CreateStreamByIndex(tjs_uint idx)
+ {
+ 	if(idx >= ItemVector.size()) TVPThrowExceptionMessage(TVPReadError);
+
+ 	tArchiveItem &item = ItemVector[idx];
+
+ 	tTJSBinaryStream *stream = TVPGetCachedArchiveHandle(this, Name);
+
+ 	tTJSBinaryStream *out;
+ 	try
+ 	{
+ 		out = new tTVPXP3ArchiveStream(this, idx, &(item.Segments), stream,
+ 			item.OrgSize);
+ 	}
+ 	catch(...)
+ 	{
+ 		TVPReleaseCachedArchiveHandle(this, stream);
+ 		throw;
+ 	}
+
++#ifdef __EMSCRIPTEN__
++	Krkr2WebNotifyOpen(this, idx, item.Name, item.Segments,
++		Krkr2WebPredictionDepth > 0);
++	// krkr2web: while the user still reads the current line, tell the page
++	// about the two numeric successors so their chunks are warm, segments
++	// inflated and WebP decoded before the click. These opens are ctor-only
++	// (no archive IO happens here).
++	if(Krkr2WebPredictionDepth < 2)
++	{
++		ttstr normalized(item.Name);
++		NormalizeInArchiveStorageName(normalized);
++		ttstr candidate;
++		if(Krkr2WebPredictSuccessor(normalized, candidate) && IsExistent(candidate))
++		{
++			++Krkr2WebPredictionDepth;
++			try
++			{
++				tTJSBinaryStream *probe = CreateStream(candidate);
++				probe->Destruct();
++			}
++			catch(...)
++			{
++			}
++			--Krkr2WebPredictionDepth;
++		}
++	}
++#endif
+ 	return out;
+ }
+ //---------------------------------------------------------------------------
+diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive.cpp
+--- a/external/krkrz/base/XP3Archive.cpp
++++ b/external/krkrz/base/XP3Archive.cpp
+@@ -747,6 +747,14 @@ tjs_int64 tTVPXP3Archive::ReadI64FromMem(const tjs_uint8 *mem)
+ //---------------------------------------------------------------------------
+ // Compressed segment cache related
+ //---------------------------------------------------------------------------
++#ifdef __EMSCRIPTEN__
++// krkr2web: scenario/voice segments are re-read on every click advance; a
++// 1MiB cache thrashes immediately against multi-hundred-MB game data.
++// 16MiB keeps the active script plus recent voice segments hot in the heap.
++#define TVP_SEGCACHE_ONE_LIMIT (4*1024*1024)
++#define TVP_SEGCACHE_TOTAL_LIMIT (16*1024*1024)
++#else
+ #define TVP_SEGCACHE_ONE_LIMIT (1024*1024)     // max size limit for each segment
+ #define TVP_SEGCACHE_TOTAL_LIMIT (1024*1024)   // total segment cache size
++#endif
+ tjs_uint TVPSegmentCacheLimit = TVP_SEGCACHE_TOTAL_LIMIT;
+ //---------------------------------------------------------------------------
+ struct tTVPSegmentCacheSearchData
+diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive.cpp
+--- a/external/krkrz/base/XP3Archive.cpp
++++ b/external/krkrz/base/XP3Archive.cpp
+@@ -815,6 +815,35 @@ public:
+ 	void AddRef() { RefCount ++; }
+ 	void Release()
+ 	{
+ 		if(RefCount == 1)
+ 		{
+ 			delete this;
+ 		}
+ 		else
+ 		{
+ 			RefCount--;
+ 		}
+ 	}
++
++#ifdef __EMSCRIPTEN__
++	// krkr2web: adopt a pre-inflated segment from the page's prefetch park
++	// (play/prefetch.js). The page lookup and copy are synchronous - the
++	// park only holds bytes that finished inflating earlier - so this path
++	// never suspends the engine.
++	bool AdoptFromPage(const ttstr &archive, tjs_int storage_index,
++		tjs_int segment_index, tjs_uint orgsize)
++	{
++		Data = new tjs_uint8 [orgsize];
++		if(!Data) return false;
++		ttstr normalized(archive);
++		tTVPArchive::NormalizeInArchiveStorageName(normalized);
++		const int copied = EM_ASM_INT(
++			{
++				const bridge = globalThis.krkr2webPrefetch;
++				if (!bridge || typeof bridge.peekSegment != 'function') return 0;
++				const bytes = bridge.peekSegment(UTF8ToString($0), $1 | 0, $2 | 0);
++				if (!bytes || bytes.length > $4) return 0;
++				HEAPU8.set(bytes, $3);
++				return bytes.length;
++			},
++			normalized.AsNarrowStdString().c_str(), storage_index, segment_index,
++			Data, (int)orgsize);
++		if(copied <= 0 || (tjs_uint)copied != orgsize)
++		{
++			delete [] Data;
++			Data = NULL;
++			return false;
++		}
++		Size = orgsize;
++		return true;
++	}
++#endif
+ };
+ //---------------------------------------------------------------------------
+ typedef tTJSRefHolder<tTVPSegmentData> tTVPSegmentDataHolder;
+diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive.cpp
+--- a/external/krkrz/base/XP3Archive.cpp
++++ b/external/krkrz/base/XP3Archive.cpp
+@@ -975,12 +975,45 @@ void tTVPXP3ArchiveStream::EnsureSegment()
+ 	// is compressed segment ?
+ 	if(CurSegment->IsCompressed)
+ 	{
+ 		// a compressed segment
+
+ 		if(CurSegment->OrgSize >= TVP_SEGCACHE_ONE_LIMIT)
+ 		{
++#ifdef __EMSCRIPTEN__
++			// krkr2web: oversized segments bypass the wasm cache but the
++			// page park can still hold them pre-inflated
++			tTVPSegmentData *krkr2webParked = new tTVPSegmentData;
++			if(krkr2webParked->AdoptFromPage(Owner->GetName(), StorageIndex,
++				CurSegmentNum, (tjs_uint)CurSegment->OrgSize))
++			{
++				SegmentData = krkr2webParked;
++				SegmentOpened = true;
++				LastOpenedSegmentNum = CurSegmentNum;
++				return;
++			}
++			krkr2webParked->Release();
++#endif
+ 			// too large to cache
+ 			Stream->SetPosition(CurSegment->Start);
+ 			SegmentData = new tTVPSegmentData;
+ 			SegmentData->SetData((tjs_uint)CurSegment->OrgSize,
+ 				Stream, (tjs_uint)CurSegment->ArcSize);
+ 		}
+ 		else
+ 		{
+ 			// search thru segment cache
+ 			tTVPSegmentCacheSearchData sdata;
+ 			sdata.Name = Owner->GetName();
+ 			sdata.StorageIndex = StorageIndex;
+ 			sdata.SegmentIndex = CurSegmentNum;
+
+ 			tjs_uint32 hash;
+ 			hash = tTVPSegmentCacheSearchHashFunc::Make(sdata);
+
+ 			SegmentData = TVPSearchFromSegmentCache(sdata, hash);
+ 			if(!SegmentData)
+ 			{
++#ifdef __EMSCRIPTEN__
++				// krkr2web: prefetched segment park hit - one memcpy instead
++				// of an archive read plus a worker inflate on the click path
++				tTVPSegmentData *krkr2webParked = new tTVPSegmentData;
++				if(krkr2webParked->AdoptFromPage(Owner->GetName(), StorageIndex,
++					CurSegmentNum, (tjs_uint)CurSegment->OrgSize))
++				{
++					TVPPushToSegmentCache(sdata, hash, krkr2webParked);
++					SegmentData = krkr2webParked;
++					SegmentOpened = true;
++					LastOpenedSegmentNum = CurSegmentNum;
++					return;
++				}
++				krkr2webParked->Release();
++#endif
+ 				// not found in cache
+ 				Stream->SetPosition(CurSegment->Start);
+ 				SegmentData = new tTVPSegmentData;
+ 				SegmentData->SetData((tjs_uint)CurSegment->OrgSize,
+ 					Stream, (tjs_uint)CurSegment->ArcSize);
+
+ 				// add to cache
+ 				TVPPushToSegmentCache(sdata, hash, SegmentData);
+ 			}
+ 		}
+ 	}

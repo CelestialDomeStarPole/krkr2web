@@ -3,11 +3,15 @@
 
   var DATABASE_NAME = "krkr2web";
   var DATABASE_VERSION = 1;
-  var DEFAULT_CACHE_BYTES = 64 * 1024 * 1024;
+  // krkr2web: raw XP3 chunk cache. Raised tiers: the click-next path reads
+  // the next voice/sprite segments from these chunks, so a hit removes an
+  // entire IndexedDB round-trip (an Asyncify suspension) from the click.
+  // Prefetched files also land here first, which is what makes the engine's
+  // own later read of a predicted file a guaranteed cache hit.
   var deviceMemory = Number(navigator.deviceMemory || 0);
   var CACHE_LIMIT_BYTES = deviceMemory > 0 && deviceMemory <= 2
-    ? 32 * 1024 * 1024
-    : (deviceMemory >= 8 ? 128 * 1024 * 1024 : DEFAULT_CACHE_BYTES);
+    ? 64 * 1024 * 1024
+    : (deviceMemory >= 8 ? 256 * 1024 * 1024 : 128 * 1024 * 1024);
   var MAX_READ_BYTES = 64 * 1024 * 1024;
   var ERROR_STORAGE = -5;
   var ERROR_CHUNK_MISSING = -4;
@@ -19,6 +23,7 @@
   var metrics = {
     openCalls: 0, readCalls: 0, closeCalls: 0, cacheHits: 0,
     cacheMisses: 0, indexedDbBytes: 0, copiedBytes: 0,
+    prefetchReads: 0, prefetchBytes: 0,
     maximumCacheBytes: 0, errors: []
   };
 
@@ -258,6 +263,53 @@
     if (handles[handle]) { delete handles[handle]; metrics.closeCalls += 1; }
   }
 
+  // krkr2web: page-side range reads for the prefetch pipeline. The engine's
+  // own readToHeap needs a wasm destination; prefetch works on plain JS
+  // buffers so predicted files can be pulled out of IndexedDB while the
+  // engine keeps running. Both share the same chunk LRU, so a prefetched
+  // range turns the engine's later read into a pure cache hit.
+  async function readRange(packagePath, offset, length) {
+    var pkg = packageForPath(packagePath);
+    if (!pkg || !Number.isSafeInteger(offset) || offset < 0 ||
+        !Number.isSafeInteger(length) || length <= 0 ||
+        length > MAX_READ_BYTES || offset > pkg.size) {
+      return null;
+    }
+    length = Math.min(length, pkg.size - offset);
+    if (length <= 0) { return null; }
+    metrics.prefetchReads += 1;
+    metrics.prefetchBytes += length;
+    var firstChunk = Math.floor(offset / pkg.chunkSize);
+    var lastChunk = Math.floor((offset + length - 1) / pkg.chunkSize);
+    try {
+      var chunks = await loadChunkRange(pkg, firstChunk, lastChunk);
+      var out = new Uint8Array(length);
+      var remaining = length;
+      var currentOffset = offset;
+      var writeOffset = 0;
+      while (remaining > 0) {
+        var chunkIndex = Math.floor(currentOffset / pkg.chunkSize);
+        var inChunk = currentOffset - chunkIndex * pkg.chunkSize;
+        var chunk = chunks[chunkIndex - firstChunk];
+        if (!chunk) { return null; }
+        var available = Math.min(remaining, chunk.byteLength - inChunk);
+        if (available <= 0) { return null; }
+        out.set(new Uint8Array(chunk, inChunk, available), writeOffset);
+        remaining -= available;
+        currentOffset += available;
+        writeOffset += available;
+      }
+      return out;
+    } catch (error) {
+      metrics.errors.push({ message: error && error.message ? error.message : String(error), at: new Date().toISOString() });
+      return null;
+    }
+  }
+
+  function prefetchRange(packagePath, offset, length) {
+    return readRange(packagePath, offset, length).then(function (value) { return value; });
+  }
+
   function releaseAll() {
     handles = {};
     if (sharedDatabase) { try { sharedDatabase.close(); } catch (error) {} sharedDatabase = null; }
@@ -277,6 +329,7 @@
 
   window.krkr2StorageBridge = {
     prepare: prepare, open: open, exists: exists, size: size,
-    readToHeap: readToHeap, close: close, releaseAll: releaseAll, snapshot: snapshot
+    readToHeap: readToHeap, close: close, releaseAll: releaseAll, snapshot: snapshot,
+    readRange: readRange, prefetchRange: prefetchRange
   };
 }());

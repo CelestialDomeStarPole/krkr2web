@@ -23,7 +23,7 @@ def main() -> None:
         "index.html", "styles.css", "app.js", "player.js", "save-manager.js",
         "storage.js", "downloader.js", "catalog.json", "resource-map.json", "engine-profiles.js",
         "assets/default-cover.png", "play/index.html", "play/styles.css", "play/app.js",
-        "play/storage.js", "engine/krkrsdl2.js", "engine/krkrsdl2.wasm",
+        "play/storage.js", "play/prefetch.js", "engine/krkrsdl2.js", "engine/krkrsdl2.wasm",
     ]
     missing = [relative for relative in required if not (root / relative).is_file()]
     if missing:
@@ -70,7 +70,7 @@ def main() -> None:
     if args.node:
         import subprocess
 
-        for script in ("storage.js", "downloader.js", "play/storage.js", "player.js", "save-manager.js", "app.js"):
+        for script in ("storage.js", "downloader.js", "play/storage.js", "play/prefetch.js", "player.js", "save-manager.js", "app.js"):
             result = subprocess.run(
                 [str(args.node), "--check", str(root / script)], capture_output=True, text=True
             )
