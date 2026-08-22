@@ -52,6 +52,15 @@ krkr2webEngineQuit。现在 TJS 全局 `krkr2webAskMessageBox` 经 Asyncify
 已部署 443，**待实机确认**：游戏内退出 → 弹"終了しますか？"→ 点
 "是" → 自动回游戏库。详见 15 号文档文末章节。
 
+同日第二轮：0078 部署后**实机引擎零输出死亡**——旧缓存页面/旧 js
+胶水 + 服务端新 wasm 混搭（服务器无视 ?v= 参数；0078 的 EM_ASM 改了
+js/wasm 接口 → 实例化即败）。修复（提交 9f3f2d2）：engine-manifest
+完整性清单 + preload bytes/sha256 校验（不匹配 bust 重拉）+ 页面
+meta build 比对自动 reload 自愈（sessionStorage 防循环）。此后引擎
+更新页面自动检测自愈。**实机需完全关闭游戏页面重开一次**（当前
+缓存的旧页面无自检代码）。stamp 陷阱：URL 形态字典键也会被加 ?v=，
+manifest 查找必须按后缀匹配。详见 15 号文档文末章节。
+
 根因链与 TJS 语言陷阱
 （无词法闭包、TouchMouse 的 owner 即 kag）详见
 [15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。

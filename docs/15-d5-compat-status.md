@@ -701,3 +701,45 @@ krkr2webEngineQuit。
 定位（canvas 黑屏），由实机验证覆盖——实机诊断已证明该链触发过
 （引擎空转即确认被 IDNO 拦截的直接后果），修复后同一操作应弹页面对
 话框。部署 443（?v=50dfe944 引擎 / ?v=5411f2a0 player）待实机确认。
+
+## 引擎缓存混搭死亡与完整性自检（2026-08-22，提交 9f3f2d2）
+
+0078 部署后实机**彻底无法进游戏**（诊断 20260822-023006）：引擎零
+输出死亡——engineLog 仅 player 侧 VIDEO_STOP、storage openCalls=0、
+audio 未激活、assets 却 ready 且字节数等于新 wasm。
+
+根因（本地 baseline 复现 + 请求轨迹实证）：**旧页面/旧 js 胶水 +
+新 wasm 混搭**。WebView 会话恢复或缓存复用旧 index.html → 引用链
+全是旧 js（缓存命中）；旧 player.js 的 wasmUrl 带旧 ?v=，但**服务器
+无视查询参数**，任何 URL 都返回最新文件 → fetch 拿到新 wasm。
+0078 的 EM_ASM 改变了 js/wasm import 接口 → 实例化失败零输出。
+此前多次部署未炸纯属补丁未改胶水接口（错配但 ABI 兼容）。服务器
+虽全局发 Cache-Control: no-cache，但内存中的旧页面复跑根本不发
+HTTP 请求，头字段救不了——客户端自检是唯一防线。
+
+修复三件套（stamp_build_versions.py + player.js）：
+1. **engine-manifest.json**：prepare 生成 js/wasm 各自 bytes+sha256
+   与联合 build id；index.html 注入 meta krkr2-engine-build。
+2. **preload 自检**：拉 manifest（no-store）→ 校验 wasm bytes+sha256
+   → 不匹配带 krkr2bust 参数 cache:reload 重拉 → 仍不匹配则 assets
+   failed 报"引擎文件校验失败"；manifest 缺失自动跳过（旧服务端
+   兼容）。crypto.subtle 缺席（非安全上下文）仅校验 bytes。
+3. **页面版本自愈**：meta build ≠ manifest build → 自动 reload 一次
+   拉新脚本链（sessionStorage 防循环）；这就是"从服务端拉取完整
+   引擎"——reload 后 no-cache 保证整链更新。
+
+**stamp 陷阱**（本轮踩坑 30 分钟）：stamp 会把 player.js 内所有
+URL 形态字符串加 ?v=，包括 `manifest.files["/engine/krkrsdl2.wasm"]`
+这个字典键 → 精确键查找静默失效、校验被跳过。必须按后缀
+（`/krkrsdl2\.wasm(\?|$)`）匹配。
+
+本地验证（.tmp/heal-drive.js 三场景 + baseline/worker 无回归）：
+旧 meta 一次 → reload 自愈游戏正常；旧 meta 永远 → 仅 reload 一次
+游戏正常；伪造期望 → bust 重拉 → failed 报错正确。
+
+**实机恢复指引**：当前实机缓存的是无自检的旧页面，需完全关闭
+游戏页面（或重启模拟器 app）重新打开一次；此后每次引擎更新页面
+都会自动检测并 reload 自愈，不再需要手动操作。
+
+诊断变化：snapshot().assets 新增 verifiedBuild（校验通过的 build id）；
+校验失败时 assets.error 含"引擎文件校验失败"与期望/实际字节数。
