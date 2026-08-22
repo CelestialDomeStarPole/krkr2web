@@ -22,9 +22,21 @@ REPORT_ENDPOINT = "/api/diagnostics-reports"
 MAX_REPORT_BYTES = 1024 * 1024
 COPY_BUFFER_BYTES = 1024 * 1024
 RANGE_PATTERN = re.compile(r"bytes=(\d+)-(\d*)$")
+# Content-addressed assets stamped by tools/stamp_build_versions.py (?v=hash).
+# The exact-hash URL can never change meaning, so it may be cached forever;
+# everything else (HTML, catalog, xp3 ranges, videos) must revalidate.
+STAMPED_QUERY = re.compile(r"v=[0-9a-f]{8}")
 
 
 class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
+    # krkr2web: HTTP/1.0 (the stdlib default) tears down the connection after
+    # every response, so each page refresh rebuilt TCP+TLS for ~12 subresources;
+    # on the flaky X5 WebView stack any of those handshakes failing drops one
+    # stylesheet/script and the page renders unstyled. 1.1 keep-alive reuses
+    # connections. Every response path here sends an exact Content-Length, which
+    # keep-alive requires.
+    protocol_version = "HTTP/1.1"
+    timeout = 60
     extensions_map = {
         **http.server.SimpleHTTPRequestHandler.extensions_map,
         ".js": "text/javascript; charset=utf-8",
@@ -67,7 +79,13 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.send_header("Origin-Agent-Cluster", "?1")
         self.send_header("Permissions-Policy", "interest-cohort=()")
-        self.send_header("Cache-Control", "no-cache")
+        if STAMPED_QUERY.fullmatch(urlsplit(self.path).query):
+            # immutable lets the WebView serve stamped assets straight from its
+            # disk cache with zero network requests — a revalidation round-trip
+            # is one more chance for the flaky mobile stack to drop a resource
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
@@ -242,7 +260,6 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
             payload = json.dumps({"files": files}, ensure_ascii=False).encode("utf-8")
             self.send_response(http.HTTPStatus.OK)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             if not head_only:
@@ -255,7 +272,6 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         payload = target.read_bytes()
         self.send_response(http.HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Cache-Control", "no-cache")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         if not head_only:

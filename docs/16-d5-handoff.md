@@ -104,6 +104,31 @@ FS.syncfs，页面再强同步必撞车超时）。**重要发现：退出是靠
    关闭游戏库页面重开（旧缓存页面无新代码），开始下载 → 刷新页面 →
    应自动继续且进度不回退。
 
+同日第五轮：**修复"CSS 偶发丢失、页面退回无样式裸奔"**（用户截图
+实锤：原始 HTML 按钮样式）。三层根因、四层防御，全部已部署：
+
+- 根因 1（最直接）：prepare_d5_product.ps1 原来先**清空整个
+  d5-product 再重建**，443 正在服务该目录——重建的数秒窗口内所有
+  请求 404，刷新恰好落在窗口内就是无样式页面。改为 staging 构建
+  （d5-product-next）+ 校验全过后两次 rename 原子换入（旧目录换名
+  为 -old，句柄忙重试 5 次；残留 -old 下次运行清理）。压测 305
+  连续请求跨整个 prepare 周期 0 失败。
+- 根因 2：服务器是 stdlib 默认 **HTTP/1.0 无 keep-alive**——每次
+  刷新 12 个子资源各自新建 TCP+TLS，X5 网络栈不稳时任一连接失败
+  即丢一个资源。protocol_version 改 HTTP/1.1（所有响应路径均发
+  精确 Content-Length，这是 keep-alive 的前提）+ handler timeout=60
+  防线程悬挂。curl 实测同连接复用多请求。
+- 根因 3：全部资源 no-cache 每次刷新都要 12 次重验往返。带 ?v=
+  内容哈希的 URL 语义永不变，改为 `Cache-Control: public,
+  max-age=31536000, immutable`——刷新时子资源全部磁盘缓存直出、
+  零网络请求；HTML/catalog/xp3/videos 仍 no-cache。443 已重启生效。
+- 页面兜底：index.html 的 stylesheet link 加 onerror 一次性重拉
+  （&retry= buster，防循环）；Playwright route abort 实测首拉被断
+  后样式自动恢复。
+- 同日早些时候另修了窄视口（<760px 旋转/分屏/输入法）整页截断：
+  去掉 html/body min-width:760px，新增 760 断点单列纵向滚动流
+  （提交 3130ef5）。
+
 根因链与 TJS 语言陷阱
 （无词法闭包、TouchMouse 的 owner 即 kag）详见
 [15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。
