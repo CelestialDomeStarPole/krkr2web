@@ -67,7 +67,7 @@ Worker 契约 → 产出 `build/d3-engine/`（探针页 + krkrsdl2.js/.wasm + li
 
 ```powershell
 .\tools\start_d5_product.ps1 [-SkipBuild] [-Http]
-# 默认监听 0.0.0.0:443（https://game.example.com/），首次自动生成开发证书
+# 默认监听 0.0.0.0:443，测试域名用 -HostName 指定；首次自动生成开发证书
 ```
 
 服务器 `tools/https_diagnostics_server.py` 要点：
@@ -84,7 +84,8 @@ Worker 契约 → 产出 `build/d3-engine/`（探针页 + krkrsdl2.js/.wasm + li
 ### 实机访问（DNS 劫持 + 证书）
 
 1. 开发电脑开热点，Android 设备连接。
-2. 把测试域名（如 `game.example.com`）解析到电脑热点 IP。
+2. 把自己的测试域名（如 `game.example.com`，经 `-HostName` 传给脚本）解析到
+   电脑热点 IP。
 3. 安装 `certs/krkr2-dev-ca.crt` 到设备受信任凭据；Android 7+ 第三方 App 可选择
    不信任用户 CA，若报证书错误需改用受系统信任的真实域名证书。私钥绝不提交、
    不外发。

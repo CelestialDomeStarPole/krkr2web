@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$BindAddress = "0.0.0.0",
     [int]$Port = 8446,
     [string]$HostName = "game.example.com",
