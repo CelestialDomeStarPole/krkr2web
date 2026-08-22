@@ -1,6 +1,6 @@
 :root { color-scheme: dark; font-family: Arial, "Microsoft YaHei", sans-serif; color: #f2f4f5; background: #101316; }
 * { box-sizing: border-box; }
-html, body { width: 100%; min-width: 760px; height: 100%; margin: 0; overflow: hidden; }
+html, body { width: 100%; min-width: 0; height: 100%; margin: 0; overflow: hidden; }
 body { background: #101316; letter-spacing: 0; }
 button, a { font: inherit; letter-spacing: 0; }
 button { cursor: pointer; }
@@ -112,4 +112,23 @@ h1 { margin: 0; font-size: 25px; }
   #library-view { grid-template-columns: minmax(410px, 1fr) 320px; }
   .library-list, .game-detail, .single-column { padding: 22px; }
   .game-list { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+}
+/* Narrow viewports (device rotation, split screen, IME resize): drop the
+   two-column library to stacked rows and relax fixed column floors, or the
+   min-width floors overflow the viewport under body overflow:hidden and the
+   clipped content becomes unreachable (no scrollbar). */
+@media (max-width: 760px) {
+  .brand span { display: none; }
+  .tabs { grid-template-columns: repeat(4, minmax(56px, 1fr)); }
+  .topbar { gap: 10px; padding: 0 12px; }
+  /* single vertical scroll flow: list on top, detail below it — splitting
+     the height 50/50 hides the detail actions behind inner scrollbars */
+  #library-view { display: block; overflow-y: auto; }
+  .library-list, .game-detail { height: auto; overflow-y: visible; padding: 16px; }
+  .game-detail { border-left: 0; border-top: 1px solid #30363b; }
+  .download-row { grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) auto; gap: 12px; }
+  .settings-list div { grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr); }
+  .save-table-heading, .save-row { grid-template-columns: 36px 96px minmax(0, 1fr) 70px; gap: 8px; }
+  .save-heading-copy strong { max-width: 200px; }
+  .section-heading { flex-wrap: wrap; }
 }
