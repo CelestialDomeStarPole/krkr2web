@@ -340,12 +340,14 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         if not isinstance(report, dict) or report.get("reportVersion") not in {1, 2, 3, 4, 5} or not isinstance(report.get("results"), dict):
             self._send_json(http.HTTPStatus.BAD_REQUEST, {"ok": False, "error": "报告结构无效"})
             return
-        if report.get("probe") == "d4-product":
+        # "d4-product" is the pre-rename value; historical devices may still
+        # submit it until every cached page has been reopened once.
+        if report.get("probe") in {"krkr2web-product", "d4-product"}:
             results = report["results"]
             installs = results.get("installs")
             offline = results.get("samePageOffline", results.get("shell"))
             if not isinstance(installs, dict) or not isinstance(offline, dict):
-                self._send_json(http.HTTPStatus.BAD_REQUEST, {"ok": False, "error": "D4 产品报告结构无效"})
+                self._send_json(http.HTTPStatus.BAD_REQUEST, {"ok": False, "error": "产品报告结构无效"})
                 return
         if report.get("reportVersion") in {3, 4, 5}:
             interactive = report["results"].get("interactive")

@@ -1,42 +1,38 @@
-# D4 Web 产品壳
+# Web 产品壳
 
-本目录是面向用户的第一轮产品页面，不是独立诊断探针。构建脚本会复制这里的页面，
-并加入 D2 下载器、D3 只读文件桥和 KRKR2 Wasm，输出到 `build/d4-product`。
+面向用户的单文档应用：游戏库、下载管理、存档管理与设置内嵌于同一 HTML，播放器
+以同页覆盖层呈现，"启动游戏"与"返回游戏库"不触发任何导航（目标宿主断网后 URL
+变化必进错误页，见 docs/02 同页断网模型）。`prepare_d5_product.ps1` 组装本目录
+与 D2 下载器、D3 存储桥和 KRKR2 Wasm，输出到 `build/d5-product`。
 
-## 当前能力
+## 页面与脚本
 
-- 从服务端 `catalog.json` 展示游戏；用户不能输入资源地址。
-- 完整下载、暂停、继续、校验和删除游戏资源。
-- 只允许启动已经完整校验并原子提交为 `ready` 的版本。
-- 联网打开页面时预载引擎；断网后在相同 URL 内启动并读取 IndexedDB 资源。
-- 游戏库和 Canvas 位于同一个 HTML 文档，启动和返回都不触发导航。
-- 播放器按 `gameId` 隔离 IDBFS 存档，定时并随页面生命周期同步。
-- 存档页查看本机存档的类型、时间和大小，支持删除选中或删除全部。
-- 播放器可在同页强制重启；致命错误后再次启动会销毁旧实例并创建新 Wasm，
-  不要求退出 WebView，也不改变 URL。
-- 设置页显示同页离线准备、存储、输入模式和内核状态，并可上传 D4 诊断报告。
+| 文件 | 职责 |
+| --- | --- |
+| `index.html` / `app.js` | 四页面框架、目录/安装状态渲染、下载操作、诊断上传 |
+| `player.js` | 同页播放器：引擎预载与完整性自检、启动/重启/强停、看门狗、视频覆盖桥、游戏对话框桥 |
+| `engine-worker-host.js` / `engine-worker.js` | Dedicated Worker + OffscreenCanvas 引擎变体（能力探测失败自动回退主线程 baseline） |
+| `save-manager.js` | 存档页：IDBFS `/savedata/<gameId>` 读取、分类展示、删除、服务器导入通关存档 |
+| `play/` | 独立播放器页（`/play/?gameId=`，无产品壳的直达启动路径） |
+| `play/prefetch.js` | 预取流水线：数字后继预测、段/图像双公园、原生解码 Worker、Inflate 池 |
 
-## 存储边界
+## 能力边界
 
-XP3 不复制到 Web 构建目录，也不进入 Cache Storage；它只通过服务端 Range 接口传输，
-并以 4 MiB 块写入 IndexedDB。删除游戏资源不会删除本机存档。
+- 只显示服务端 `catalog.json` 配置的游戏；只允许启动 `complete=true` 且版本
+  匹配的安装；启动阶段零网络请求。
+- XP3 不进 Cache Storage，只以 4 MiB 块存于 IndexedDB；删除游戏资源不删除存档。
+- 存档按 `gameId` 隔离（IDBFS），至少每 30 秒及 `visibilitychange`/`pagehide`
+  同步；引擎自行退出时页面不再强制同步（避免与引擎自带 syncfs 竞争超时）。
+- 界面文案面向最终用户；内部代号只出现在诊断遥测（`KRKR2WEB_*` 日志标签、
+  报告字段）中。
 
-## 构建与本地检查
+## 本地检查与运行
 
 ```powershell
-.\tools\prepare_d4_product.ps1
-python tools\https_diagnostics_server.py --http --bind 127.0.0.1 --port 8768 `
-  --directory build\d4-product --reports-directory diagnostic-reports `
-  --resource-map build\d4-product\resource-map.json
+.\tools\prepare_d5_product.ps1          # 组装 + 语法门禁 + 产物校验（staging 原子换入）
+.\tools\start_d5_product.ps1 -Http -SkipBuild   # 本机 http 预览
 ```
 
-正式实机入口使用 `tools/start_d4_product.ps1`，默认监听 `0.0.0.0:443` 并为
-`game.example.com` 生成测试证书。
-
-## D4 验收结果
-
-- 目标 WebView 89 的断网同页启动已通过，报告编号
-  `20260813-151518-903d7485`。
-- 多游戏真实目录、版本升级策略的实机覆盖。
-- 《千恋万花》专用插件、性能和 60 分钟稳定性属于 D5。
-- 视频是 D6 必做能力，首轮产品壳未实现，但没有从产品范围移除。
+浏览器冒烟：`tests/d4_browser_smoke.js`（安装、断网零请求启动、存档管理、
+模拟崩溃恢复）。UI 状态全局探针 `window.d4AppState()` / `window.d4PlayerState()`
+供冒烟测试与现场诊断使用。

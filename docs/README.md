@@ -1,63 +1,46 @@
 # KRKR2 Web 产品与开发文档
 
-本文档集描述一个运行在第三方 Android WebView 89 中的通用 KRKR2 游戏模拟器。
-目标 WebView 不可修改、不可升级，也不能使用系统文件下载或文件选择器。因此，
-应用程序和游戏资源都必须通过 HTTPS 获取，并保存在浏览器站点存储中。
+本文档集描述一个运行在固定第三方 Android WebView（Chromium 89）中的通用 KRKR2
+游戏模拟器：用户从服务端配置的游戏库下载完整资源到浏览器站点存储，页面保持在
+WebView 内时断网仍可启动、游玩和读取本地存档。首个完整验收游戏为《千恋万花》。
 
 ## 阅读顺序
 
-设计、产品或测试人员先阅读 00、07、10；开发人员按 10 的阶段门禁工作，并以
-11、12、14 作为接口与架构约束。旧的可行性问题保留在 01、08 中，不应绕过已经
-记录的实机结论重新假设能力。
+- 新成员与评审：01 产品范围 → 02 架构与运行时 → 09 验证记录。
+- 日常开发：02 架构 → 03 模块契约 → 04 构建与部署；改引擎前先读 07 决策记录。
+- 适配新游戏：05 游戏适配指南。
+- 排障：06 排障手册，先读其中"环境陷阱"一节。
 
 ## 文档索引
 
-- [00-产品范围与验收](00-product-scope.md)
-- [01-可行性验证计划](01-feasibility-plan.md)
-- [02-候选架构](02-architecture.md)
-- [03-资源缓存协议](03-resource-cache-protocol.md)
-- [04-Chrome 89 兼容边界](04-chrome89-compatibility.md)
-- [05-内存与性能预算](05-memory-performance.md)
-- [06-游戏兼容与视频路线](06-game-compatibility-media.md)
-- [07-测试与验收](07-test-acceptance.md)
-- [08-风险、假设与待确认项](08-risks-and-open-questions.md)
-- [09-开发就绪评审](09-development-readiness.md)
-- [10-开发路线图与阶段门禁](10-development-roadmap.md)
-- [11-模块边界与接口契约](11-module-contracts.md)
-- [12-开发环境与可复现构建](12-development-environment.md)
-- [13-上游基线与许可证审计](13-upstream-license-audit.md)
-- [14-架构决策记录](14-architecture-decisions.md)
-- [15-D5《千恋万花》兼容与性能现状](15-d5-compat-status.md)
-- [D2 游戏下载与缓存验证](../probes/d2-downloader/README.md)
-- [D3 KRKR2 引擎验证](../probes/d3-engine/README.md)
+- [01-产品范围与当前状态](01-product-scope.md)
+- [02-架构与运行时](02-architecture.md)
+- [03-模块契约](03-module-contracts.md)
+- [04-构建与部署](04-build-and-deploy.md)
+- [05-游戏适配指南](05-game-adaptation.md)
+- [06-排障手册](06-troubleshooting.md)
+- [07-架构决策记录](07-architecture-decisions.md)
+- [08-上游基线与许可证](08-upstream-licensing.md)
+- [09-验证记录](09-verification-log.md)
 
-## 当前结论
+另见各子目录 README：[apps/web 产品壳](../apps/web/README.md)、
+[engine 引擎基线](../engine/README.md)、
+[diagnostics 实机检测工具](../diagnostics/README.md)、
+[probes/d2-downloader 下载探针](../probes/d2-downloader/README.md)、
+[probes/d3-engine 引擎探针](../probes/d3-engine/README.md)。
 
-2026-08-12 已在目标设备完成第一轮实机验证：
+## 两条铁律
 
-1. **大容量缓存门槛已通过。** 站点配额约 27.19 GiB；5 GB IndexedDB 数据写入
-   成功，关闭第三方 App 后仍存在，整台设备重启后也仍存在。
-2. **共享内存主方案不通过。** 服务器已返回正确的 COOP/COEP 响应头，但目标
-   WebView 仍未开放 `SharedArrayBuffer`、跨源隔离和 Wasm 共享内存。
-3. **目标宿主不支持 Service Worker。** 腾讯 TBS 046295 注册失败，且断网导航会进入
-   错误页；产品已改为当前文档内预载引擎和切换 Canvas，只验收页面不退出时的断网启动。
+1. **实机结论不可绕过。** 09 号文档记录的目标设备能力边界（无 SharedArrayBuffer、
+   Service Worker 不可注册、断网后任何 URL 变化必进宿主错误页等）全部有实机报告
+   为证。任何新方案不得按"现代浏览器应该可以"重新假设这些结论。
+2. **引擎改动必须走补丁。** 对上游引擎源码的任何修改都要固化为
+   `engine/patches/NNNN-*.patch` 并登记进 `engine/upstream.json`；构建工作树
+   （`build/d3-engine-work`）是可丢弃的，直接改它会在下次重建时丢失。
 
-项目仍有条件可行。D0、不依赖共享内存的 D1 文件读取 PoC 和 D2 真实 4 GB 下载
-存储均已通过，当前进入 D3 完整引擎最小闭环。第一轮实机报告为
-`diagnostic-reports/20260812-145616-0060df64.json`，其中 5 GB 测试显示为用户取消，
-关闭 App 与设备重启后的保留结果由测试者在报告上传后人工确认。检测工具运行方式
-见 [检测工具说明](../diagnostics/README.md)。
+## 组织方式说明
 
-## 开发阶段结论
-
-文档详细度已经能够支撑开发，但只授权按门禁推进：
-
-- D0 已通过：Chrome 89 最小构建可加载且不包含禁用特性。
-- D1 已通过：Asyncify + IndexedDB 文件读取、后台恢复和内存趋势满足门禁。
-- D2 已通过：4.04 GB 下载、恢复、全量校验、坏块修复和空间回收均有实机证据。
-- D3 可以开始：接入 KRKR2 最小引擎、XP3/TJS/KAG、图形、音频、输入和存档闭环。
-- D3 第一轮桌面门禁已通过：IndexedDB XP3、TJS 与 KRKR2 原生画布出帧已形成闭环；
-  目标 WebView 89 实机也已复核通过，当前继续文字、图像、音频、输入和存读档。
-
-这一限制是技术风险控制，不是需求不完整。完整评审见
-[开发就绪评审](09-development-readiness.md)。
+本目录早期按 D0-D6 开发门禁阶段组织（可行性计划、路线图、逐阶段验收过程等）。
+项目于 2026-08 达成"完整可玩"里程碑并进入产品化阶段后，上述内容已提炼并入本文
+档集：门禁结论与实机报告编号归档于 09 号文档，排障与事故经验归档于 06 号文档，
+逐阶段的过程细节请查阅 Git 提交历史。

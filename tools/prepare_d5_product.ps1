@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SkipEngineBuild
 )
 
@@ -62,7 +62,7 @@ $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFr
 foreach ($game in $catalog.games) {
     if ($game.gameId -eq "senren-banka") {
         $game | Add-Member -NotePropertyName coverUrl -NotePropertyValue "/assets/default-cover.png" -Force
-        $game | Add-Member -NotePropertyName description -NotePropertyValue "D5 compatibility and performance development build." -Force
+        $game | Add-Member -NotePropertyName description -NotePropertyValue "Yuzusoft《千恋万花》：和风奇幻恋爱冒险游戏，全程语音。完整下载约 3.77 GiB 后即可在本机离线游玩，支持存读档、场景回想与 CG 鉴赏。" -Force
     }
 }
 $catalog | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $catalogPath -Encoding UTF8

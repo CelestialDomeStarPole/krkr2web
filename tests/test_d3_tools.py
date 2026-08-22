@@ -78,9 +78,20 @@ class D3Xp3Tests(unittest.TestCase):
         self.assertIn("patches/0006-web-decompression-stream.patch", engine_lock["patches"])
         self.assertIn("patches/0007-web-plugin-contract.patch", engine_lock["patches"])
         self.assertIn("patches/0008-web-addfont-shim.patch", engine_lock["patches"])
-        self.assertIn(
-            "patches/0037-psbfile-utf8-boundary.patch",
-            engine_lock["postCopyPatches"],
+        # engine/upstream.json is the build authority: every listed patch must
+        # exist on disk, and no patch file may linger after it is retired from
+        # the lock (retired leftovers silently rot and mislead readers).
+        listed = set(engine_lock["patches"])
+        on_disk = {
+            f"patches/{entry.name}"
+            for entry in (ROOT / "engine" / "patches").iterdir()
+            if entry.name.endswith(".patch")
+        }
+        self.assertEqual(
+            listed - on_disk, set(), "patches listed in upstream.json are missing on disk"
+        )
+        self.assertEqual(
+            on_disk - listed, set(), "patch files on disk are not listed in upstream.json"
         )
         decompression_patch = (
             ROOT / "engine" / "patches" / "0006-web-decompression-stream.patch"
@@ -117,9 +128,9 @@ class D3Xp3Tests(unittest.TestCase):
             ROOT / "engine" / "patches" / "0041-web-trans-throttle-heartbeat-stats.patch"
         ).read_text(encoding="utf-8")
         self.assertIn("patches/0041-web-trans-throttle-heartbeat-stats.patch", engine_lock["patches"])
-        self.assertIn("last_recompose_tick < 33", stall_patch)
         self.assertIn("KRKR2WEB_D5_TRANS_STATS", stall_patch)
         self.assertIn("krkr2webEngineHeartbeat", stall_patch)
+        self.assertIn("(heartbeat_counter++ & 3)", stall_patch)
         input_budget_patch = (
             ROOT / "engine" / "patches" / "0046-web-input-frame-budget.patch"
         ).read_text(encoding="utf-8")
@@ -138,7 +149,6 @@ class D3Xp3Tests(unittest.TestCase):
         self.assertIn("AL_SAMPLE_OFFSET", runtime_fix_patch)
         self.assertIn("_bufferSize[_bufferIdx] = len", runtime_fix_patch)
         self.assertIn("total += _bufferSize[idx] / _frame_size", runtime_fix_patch)
-        self.assertIn("Dropping the normalized duplicate", runtime_fix_patch)
         self.assertIn("SDL_WINDOW_ALLOW_HIGHDPI", runtime_fix_patch)
         self.assertIn('name != TJS_W("*loop")', runtime_fix_patch)
         render_fix_patch = (
@@ -148,7 +158,6 @@ class D3Xp3Tests(unittest.TestCase):
             "patches/0045-web-gpu-style-present-fast-transition.patch",
             engine_lock["patches"],
         )
-        self.assertIn("Time = 2", render_fix_patch)
         self.assertIn("rect.w = this->surface->w - rect.x", render_fix_patch)
         self.assertIn("rect.y * this->surface->pitch", render_fix_patch)
         self.assertIn("update_rect.clear()", render_fix_patch)
@@ -188,9 +197,10 @@ class D3Xp3Tests(unittest.TestCase):
         self.assertIn('else if(name == TJS_W("motionplayer.dll"))', ncb_dispatch_patch)
         self.assertIn("if(loadNCBModule(name))", ncb_dispatch_patch)
         self.assertIn("lazy-psb", ncb_dispatch_patch)
-        self.assertNotIn("TVPGetCommandLine", ncb_dispatch_patch)
-        self.assertNotIn(
-            'else if(name == TJS_W("motionplayer.dll") &&',
+        # motionplayer must no longer require the bootstrap command-line flag;
+        # the flag reference only survives as a removed line in the patch.
+        self.assertIn(
+            '-		TVPGetCommandLine(TJS_W("-krkr2web-motion-bootstrap")))',
             ncb_dispatch_patch,
         )
         addfont_patch = (

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <meta name="theme-color" content="#15191d">
-  <link rel="icon" href="data:,">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2315191d'/%3E%3Cpath d='M20 14h8v14l12-14h10L36 30l14 20H40L28 34v16h-8z' fill='%23e7b84b'/%3E%3C/svg%3E">
   <title>KRKR2 Web</title>
   <link rel="stylesheet" href="/styles.css" onerror="if(!this.dataset.retried){this.dataset.retried=1;var retry=document.createElement('link');retry.rel='stylesheet';retry.href=this.getAttribute('href')+'&retry='+Date.now();document.head.appendChild(retry);this.remove();}">
 </head>
@@ -82,7 +82,7 @@
           <div><dt>同页离线</dt><dd id="offline-ready-status">准备中</dd></div>
           <div><dt>资源存储</dt><dd>IndexedDB · 4 MiB 分块</dd></div>
           <div><dt>默认操作</dt><dd id="input-mode">触摸</dd></div>
-          <div><dt>引擎模式</dt><dd>单线程 · 64 MiB 初始内存</dd></div>
+          <div><dt>引擎模式</dt><dd id="engine-mode">Wasm 单线程 · 64 MiB 初始内存</dd></div>
           <div><dt>内核</dt><dd id="runtime-version">Chrome --</dd></div>
         </dl>
         <div class="settings-actions">
@@ -105,7 +105,7 @@
       <canvas id="canvas" tabindex="-1"></canvas>
       <div id="player-loading-panel" class="player-loading-panel">
         <strong id="player-status">正在检查本机资源</strong>
-        <span id="player-detail">只会启动已经完整校验的游戏。</span>
+        <span id="player-detail">启动前会完成本机资源完整性校验。</span>
       </div>
     </div>
   </section>

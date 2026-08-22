@@ -16,6 +16,7 @@
     detail: document.getElementById("game-detail"),
     downloads: document.getElementById("download-list"),
     offlineReady: document.getElementById("offline-ready-status"),
+    engineMode: document.getElementById("engine-mode"),
     input: document.getElementById("input-mode"),
     runtime: document.getElementById("runtime-version"),
     upload: document.getElementById("upload-diagnostics"),
@@ -65,6 +66,14 @@
     } else {
       elements.offlineReady.textContent = "尚未准备";
     }
+  }
+
+  function renderEngineMode() {
+    var capability = window.krkr2Player.snapshot().workerCapability;
+    var placement = capability && capability.supported
+      ? "Worker 独立线程运行"
+      : "页面主线程运行";
+    elements.engineMode.textContent = "Wasm 单线程 · " + placement + " · 64 MiB 初始内存";
   }
 
   async function loadCatalog() {
@@ -152,7 +161,7 @@
     heading.querySelector("p").textContent = formatBytes(game.requiredBytes) + " · " + statusLabel(install);
     var badge = document.createElement("span");
     badge.className = "compatibility";
-    badge.textContent = game.compatibility === "verified" ? "已验证" : "开发验证";
+    badge.textContent = game.compatibility === "verified" ? "已验证" : "适配优化中";
     header.appendChild(heading);
     header.appendChild(badge);
     elements.detail.appendChild(header);
@@ -380,7 +389,7 @@
     try { lastSession = JSON.parse(localStorage.getItem("krkr2web-d4-last-session") || "null"); } catch (error) {}
     var report = {
       reportVersion: 1,
-      probe: "d4-product",
+      probe: "krkr2web-product",
       createdAt: new Date().toISOString(),
       environment: { userAgent: navigator.userAgent, online: navigator.onLine, href: location.href },
       results: {
@@ -428,6 +437,7 @@
     elements.upload.addEventListener("click", uploadDiagnostics);
     window.addEventListener("krkr2-player-state", function () {
       renderOfflineReady();
+      renderEngineMode();
       if (catalog) { renderDetail(); }
     });
     updateNetwork();
@@ -437,6 +447,7 @@
     var chrome = navigator.userAgent.match(/(?:Chrome|Chromium)\/(\d+)/);
     elements.runtime.textContent = "Chrome " + (chrome ? chrome[1] : "--");
     renderOfflineReady();
+    renderEngineMode();
     window.krkr2Player.preload().catch(function () {});
     await loadCatalog();
     var interrupted = await resumeInstalls();

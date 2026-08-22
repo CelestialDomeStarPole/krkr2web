@@ -31,13 +31,13 @@
     return new Promise(function (resolve, reject) {
       var transaction = request.transaction;
       request.onsuccess = function () { resolve(request.result); };
-      request.onerror = function () { reject(request.error || new Error("IndexedDB request failed")); };
+      request.onerror = function () { reject(request.error || new Error("IndexedDB 请求失败")); };
       if (transaction) {
         // an aborted transaction never fires request onerror/on success in
         // some Chrome builds; without this the promise hangs forever and the
         // engine's Asyncify suspension never resumes (observed as the
         // idle freeze on device)
-        transaction.onabort = function () { reject(transaction.error || new Error("IndexedDB transaction aborted")); };
+        transaction.onabort = function () { reject(transaction.error || new Error("IndexedDB 事务已中止")); };
       }
     });
   }
@@ -104,8 +104,8 @@
         }
       };
       request.onsuccess = function () { resolve(request.result); };
-      request.onerror = function () { reject(request.error || new Error("Cannot open resource database")); };
-      request.onblocked = function () { reject(new Error("Resource database is blocked by another page")); };
+      request.onerror = function () { reject(request.error || new Error("无法打开本机资源数据库")); };
+      request.onblocked = function () { reject(new Error("本机资源数据库被其他页面占用，请关闭其他打开的页面后重试")); };
     });
   }
 
@@ -187,18 +187,18 @@
       if (!database.objectStoreNames.contains("installs") ||
           !database.objectStoreNames.contains("manifests") ||
           !database.objectStoreNames.contains("chunks")) {
-        throw new Error("D2 resource database is incomplete");
+        throw new Error("本机资源数据库不完整，请返回游戏库重新校验或重新下载");
       }
       var install = await requestResult(database.transaction("installs", "readonly").objectStore("installs").get(gameId));
       if (!install || install.status !== "ready" || install.complete !== true || !install.activeVersion) {
-        throw new Error("The selected game is not fully installed");
+        throw new Error("游戏资源尚未完整安装，请先完成下载");
       }
       var record = await requestResult(database.transaction("manifests", "readonly").objectStore("manifests").get([
         gameId, install.activeVersion
       ]));
       var manifest = record && record.value;
       if (!manifest || !Array.isArray(manifest.packages) || manifest.packages.length === 0) {
-        throw new Error("The installed game manifest is missing");
+        throw new Error("已安装游戏的资源清单缺失，请返回游戏库重新校验");
       }
       state = { gameId: gameId, version: install.activeVersion, install: install, manifest: manifest };
       return state;
