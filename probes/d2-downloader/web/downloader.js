@@ -1,8 +1,11 @@
 (function () {
   "use strict";
 
-  var MAX_CONCURRENCY = 2;
+  var MAX_CONCURRENCY = 4;
   var MAX_HASH_ATTEMPTS = 3;
+  var MAX_NETWORK_ATTEMPTS = 6;
+  var NETWORK_RETRY_BASE_MS = 2000;
+  var NETWORK_RETRY_MAX_MS = 30000;
   var DELETE_BATCH_SIZE = 32;
 
   function codedError(code, message, cause) {
@@ -38,6 +41,7 @@
       completedAt: null,
       networkRequests: 0,
       networkBytes: 0,
+      networkRetries: 0,
       reusedBytes: 0,
       committedBytes: 0,
       hashFailures: 0,
@@ -197,7 +201,7 @@
         if (chunkKeys[id] && state && state.sha256 === expectedHash && state.length === expectedLength) {
           reusedBytes += expectedLength;
         } else {
-          tasks.push({ pkg: pkg, chunkIndex: chunkIndex, attempts: 0, repair: repairMode || !!state || !!chunkKeys[id] });
+          tasks.push({ pkg: pkg, chunkIndex: chunkIndex, repair: repairMode || !!state || !!chunkKeys[id] });
         }
       });
     });
@@ -253,7 +257,6 @@
     var start = task.chunkIndex * pkg.chunkSize;
     var length = window.d2Storage.expectedChunkLength(pkg, task.chunkIndex);
     var end = start + length - 1;
-    task.attempts += 1;
     this.activeRequests += 1;
     this.inFlightBytes += length;
     this.metrics.networkRequests += 1;
@@ -283,7 +286,8 @@
       var actualHash = await sha256(data);
       if (actualHash !== pkg.chunks[task.chunkIndex]) {
         this.metrics.hashFailures += 1;
-        if (task.attempts < MAX_HASH_ATTEMPTS) { return { retry: true }; }
+        task.hashAttempts = (task.hashAttempts || 0) + 1;
+        if (task.hashAttempts < MAX_HASH_ATTEMPTS) { return { retry: true }; }
         throw codedError("E_VERSION_CHANGED", "资源块连续三次校验失败，服务器内容可能已变化");
       }
       this.metrics.networkBytes += data.byteLength;
@@ -314,6 +318,7 @@
   };
 
   Downloader.prototype.worker = async function (shared) {
+    var self = this;
     while (!shared.failure && !this.paused) {
       var task = this.tasks.shift();
       if (!task) { return; }
@@ -321,8 +326,28 @@
         var result = await this.downloadChunk(task);
         if (result.retry) { this.tasks.push(task); }
       } catch (error) {
-        this.tasks.unshift(task);
-        shared.failure = error;
+        var retriable = error && error.code === "E_NETWORK" &&
+          (task.networkAttempts || 0) < MAX_NETWORK_ATTEMPTS;
+        if (retriable) {
+          task.networkAttempts = (task.networkAttempts || 0) + 1;
+          this.metrics.networkRetries += 1;
+          this.tasks.unshift(task);
+          var delay = Math.min(
+            NETWORK_RETRY_BASE_MS * Math.pow(2, task.networkAttempts - 1),
+            NETWORK_RETRY_MAX_MS
+          );
+          this.emit("retry", {
+            packageId: task.pkg.id,
+            chunkIndex: task.chunkIndex,
+            attempt: task.networkAttempts,
+            delayMs: delay,
+            message: errorText(error)
+          });
+          await new Promise(function (resolve) { setTimeout(resolve, delay); });
+        } else {
+          this.tasks.unshift(task);
+          shared.failure = error;
+        }
       }
       await new Promise(function (resolve) { setTimeout(resolve, 0); });
     }
@@ -397,7 +422,7 @@
           if (valid) { valid = await sha256(record) === pkg.chunks[chunkIndex]; }
           this.metrics.verifiedChunks += 1;
           if (!valid) {
-            broken.push({ pkg: pkg, chunkIndex: chunkIndex, attempts: 0, repair: true });
+            broken.push({ pkg: pkg, chunkIndex: chunkIndex, repair: true });
             await window.d2Storage.deleteChunk(this.manifest, pkg, chunkIndex);
           }
           this.emit("verifyProgress", {

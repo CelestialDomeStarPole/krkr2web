@@ -245,6 +245,9 @@
       verifyProgress: function (progress) {
         notify("正在校验 " + progress.packageId + " · 第 " + (progress.chunkIndex + 1) + " 块");
       },
+      retry: function (info) {
+        notify("网络波动，" + (info.delayMs / 1000) + " 秒后自动重试（第 " + info.attempt + " 次）");
+      },
       deleteProgress: function (progress) { notify("正在删除 " + progress.deleted + " / " + progress.total + " 块"); }
     };
   }
@@ -257,6 +260,44 @@
       installs[game.gameId] = snapshot.install;
     }
     return downloaders[game.gameId];
+  }
+
+  // Rebuild each game's downloader state on boot. Without this the install
+  // record loaded straight from IndexedDB keeps its stale "downloading"
+  // status after a page refresh, the detail view only offers a no-op
+  // "暂停下载" button (no downloader instance exists yet), and resume is
+  // unreachable. Downloader.load() rewrites the interrupted status to
+  // "paused" and recomputes committedBytes from the stored chunks.
+  async function resumeInstalls() {
+    var interrupted = {};
+    for (var index = 0; index < catalog.games.length; index += 1) {
+      var game = catalog.games[index];
+      var raw = installs[game.gameId];
+      interrupted[game.gameId] = !!(raw && raw.status === "downloading" && raw.complete !== true);
+      try {
+        var downloader = await getDownloader(game);
+        installs[game.gameId] = downloader.snapshot().install;
+      } catch (error) {
+        notify("恢复 " + game.title + " 的下载清单失败：" + (error.message || String(error)));
+      }
+    }
+    return interrupted;
+  }
+
+  // A refresh mid-download is unintentional: resume automatically. Manual
+  // pauses (status already "paused" before the refresh) stay paused.
+  function autoResume(interrupted) {
+    catalog.games.forEach(function (game) {
+      if (!interrupted[game.gameId]) { return; }
+      var install = installs[game.gameId];
+      if (!install || install.complete === true || ["paused", "recoverable-error"].indexOf(install.status) === -1) { return; }
+      var downloader = downloaders[game.gameId];
+      if (!downloader || downloader.running) { return; }
+      notify("检测到上次下载被中断，正在继续：" + game.title);
+      downloader.start().catch(function (error) {
+        notify("自动续传失败：" + (error.message || String(error)) + "，可稍后点击“继续下载”");
+      });
+    });
   }
 
   async function runAction(action) {
@@ -398,9 +439,11 @@
     renderOfflineReady();
     window.krkr2Player.preload().catch(function () {});
     await loadCatalog();
+    var interrupted = await resumeInstalls();
     if (window.krkr2SaveManager) { window.krkr2SaveManager.setGame(selectedGame()); }
     await updateStorage();
     render();
+    autoResume(interrupted);
   }
 
   window.d4AppState = function () {

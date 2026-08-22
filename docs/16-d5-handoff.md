@@ -71,6 +71,39 @@ FS.syncfs，页面再强同步必撞车超时）。**重要发现：退出是靠
 改成空实现会导致退出永久卡死（本地实证三轮），0007 已加注释封存，
 **勿改**。详见 15 号文档"退出路径复盘"章节。
 
+同日第四轮（2026-08-22）两件事：
+
+1. **实机复验退出仍不自动回库，用户决定暂缓**（"实在修不好就算了"）。
+   030207 诊断与本地复刻里 player 层都已 hide（stopReason=engine-quit、
+   samePageOffline.visible=false），实机却不回；且本轮复验的诊断没有
+   上传到 diagnostic-reports（最新仍是 030207），缺实机侧新证据。后续
+   若重启此问题，先拿实机诊断看 alerts/engineLog 尾部（怀疑方向：TBS X5
+   的 native alert 阻塞恢复行为与桌面 Chrome 不同）。
+2. **修复"下载途中刷新网页无法断点续传"并加强下载器**。根因：产品版
+   app.js 的 boot 只 `d2Storage.getInstall()` 直接读 IndexedDB 记录，
+   从不调用 `Downloader.load()`——刷新后 install 停留在 "downloading"，
+   详情页只渲染"暂停下载"按钮，而点击走 `downloaders[gameId]`（此时
+   不存在）直接 no-op，UI 死锁且无"继续下载"入口（恢复逻辑住在
+   Downloader.load() 里，D2 探针页在 boot 时调用它所以探针一直正常）。
+   修复（probes/d2-downloader/web/downloader.js + apps/web/app.js）：
+   - boot 时对每个游戏 `resumeInstalls()` 跑恢复清单（downloading →
+     paused、committedBytes 按已存块重算）；
+   - 刷新前正在下载（非用户主动暂停）→ 刷新后**自动续传**；
+     用户主动 paused 的刷新后保持 paused 不自动续传；
+   - 网络错误（E_NETWORK/408/429/5xx/连接断开）任务级指数退避重试
+     （2s 起、封顶 30s、每块最多 6 次），不再一次抖动就停整个下载；
+     hash 重试与网络重试计数分离（原共用计数会把内容校验误判成
+     E_VERSION_CHANGED 致命错）；
+   - 并发 2 → 4（服务器是 ThreadingHTTPServer，多线程可扛）。
+   本地验证（.tmp/resume-probe.js，persistent profile 绕开临时
+   headless 3GiB 配额限制）：下载 68MiB → 刷新 → 块数只增不重置 +
+   自动续传推进到 204MiB → 手动暂停+刷新保持 paused → 手动继续到
+   296MiB，全过；期间服务器断连两次（ERR_TOO_MANY_RETRIES）均由退避
+   重试自动恢复。已部署 443（app.js?v=b69dda52、downloader.js
+   ?v=c6a4913f，引擎 manifest 未变无需自愈）。**实机复验方法**：完整
+   关闭游戏库页面重开（旧缓存页面无新代码），开始下载 → 刷新页面 →
+   应自动继续且进度不回退。
+
 根因链与 TJS 语言陷阱
 （无词法闭包、TouchMouse 的 owner 即 kag）详见
 [15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。
