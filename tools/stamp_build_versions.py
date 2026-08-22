@@ -13,6 +13,7 @@ stable cache identity.
 """
 import argparse
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -34,6 +35,17 @@ PLAYER_RUNTIME_ASSETS = [
     "engine/krkrsdl2.js",
     "engine/krkrsdl2.wasm",
     "play/storage.js",
+]
+
+# The engine js/wasm pair must always be replaced together: a stale cached
+# HTML/JS paired with a fresh wasm fails instantiation with zero engine
+# output whenever the glue interface changes (patch 0078's EM_ASM did).
+# The manifest lets the player verify what it actually downloaded, and the
+# page meta lets it detect a stale page against the manifest and self-heal.
+ENGINE_MANIFEST_NAME = "engine-manifest.json"
+ENGINE_FILES = [
+    "engine/krkrsdl2.js",
+    "engine/krkrsdl2.wasm",
 ]
 
 
@@ -96,6 +108,39 @@ def main() -> None:
     page_path = root / "index.html"
     page = page_path.read_text(encoding="utf-8")
     stamped_page = stamp_html(page, versions)
+
+    # Engine integrity manifest: full sha256 + byte size per engine file,
+    # plus a combined build id mirrored into the page meta so the player can
+    # (1) verify the wasm it fetched and re-pull with a buster on mismatch,
+    # (2) detect a stale cached page and force one self-healing reload.
+    manifest_files = {}
+    combined = hashlib.sha256()
+    for rel in ENGINE_FILES:
+        asset = root / rel
+        if not asset.is_file():
+            continue
+        blob = asset.read_bytes()
+        combined.update(blob)
+        manifest_files["/" + rel] = {
+            "bytes": len(blob),
+            "sha256": hashlib.sha256(blob).hexdigest(),
+        }
+    build = combined.hexdigest()[:8]
+    (root / ENGINE_MANIFEST_NAME).write_text(
+        json.dumps(
+            {"schemaVersion": 1, "build": build, "files": manifest_files},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    stamped_page = re.sub(r'\s*<meta name="krkr2-engine-build" content="[0-9a-f]+">', "", stamped_page)
+    stamped_page = stamped_page.replace(
+        '<meta name="theme-color"',
+        f'<meta name="krkr2-engine-build" content="{build}">\n  <meta name="theme-color"',
+        1,
+    )
     page_path.write_text(stamped_page, encoding="utf-8")
 
     refs = re.findall(r'(?:href|src)=["\'](/[a-zA-Z0-9_./-]+\?v=[0-9a-f]{8})', stamped_page)
@@ -103,6 +148,7 @@ def main() -> None:
         print("stamped: " + ref)
     if not refs:
         raise SystemExit("no stamped references found in index.html")
+    print(f"engine manifest: /{ENGINE_MANIFEST_NAME} build={build}")
 
 
 if __name__ == "__main__":
