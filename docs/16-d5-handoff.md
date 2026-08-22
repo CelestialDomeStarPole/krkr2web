@@ -61,6 +61,16 @@ meta build 比对自动 reload 自愈（sessionStorage 防循环）。此后引�
 缓存的旧页面无自检代码）。stamp 陷阱：URL 形态字典键也会被加 ?v=，
 manifest 查找必须按后缀匹配。详见 15 号文档文末章节。
 
+同日第三轮：**实机确认退出修复与自检全部通过**（诊断
+20260822-030207：verifiedBuild 校验通过、游戏完整启动、
+stopReason=engine-quit 回库）。顺手修掉退出时"存档同步失败：超时"
+（player 的 krkr2webEngineQuit 改 sync:false——引擎关闭自带
+FS.syncfs，页面再强同步必撞车超时）。**重要发现：退出是靠异常级联
+驱动的**——游戏正常关闭链在 showdate.tjs 析构异常处断掉，靠 menu
+垫片 finalize 的析构异常触发致命异常退出路径才完成退出；把 finalize
+改成空实现会导致退出永久卡死（本地实证三轮），0007 已加注释封存，
+**勿改**。详见 15 号文档"退出路径复盘"章节。
+
 根因链与 TJS 语言陷阱
 （无词法闭包、TouchMouse 的 owner 即 kag）详见
 [15-d5-compat-status.md](15-d5-compat-status.md) 文末触摸章节。

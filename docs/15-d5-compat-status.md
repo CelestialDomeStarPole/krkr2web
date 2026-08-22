@@ -743,3 +743,51 @@ URL 形态字符串加 ?v=，包括 `manifest.files["/engine/krkrsdl2.wasm"]`
 
 诊断变化：snapshot().assets 新增 verifiedBuild（校验通过的 build id）；
 校验失败时 assets.error 含"引擎文件校验失败"与期望/实际字节数。
+
+## 实机验证通过 + 退出路径复盘（2026-08-22 二轮）
+
+实机诊断 20260822-030207-4a9114f1：**退出修复与自检双双通过**。
+游戏完整启动（XP3 39045 文件、全插件链接、标题画面），
+`assets.verifiedBuild=f92c650c`（wasm 校验通过）；游戏内退出走完
+确认 → shutdown → `stopReason=engine-quit`、`forcedStopCount=0`
+（对照上轮死亡诊断 forcedStopCount=2 工具栏强停），页面正常回库。
+
+### 退出全链路本地复刻（关键发现）
+
+本地（baseline 变体 + Playwright）完整复刻实机退出：标题 → 終了
+（引擎触摸空间相对 (0.124,0.925)）→ **游戏自绘确认**（custom.ks
+*end_hook 的 askYesNo AskExit——不是 win32dialog messageBox！）→
+はい → *end_wait 二次确认 → end.ks → window_cn.pimg → teardown →
+engine-quit 回库。注意确认点击必须按 engineLog 进度 gating（设备
+节奏：确认1 → 290ms → 确认2 → 等 window UI → 475ms 内三连点），
+固定间隔盲点会把关闭流程点岔导致卡死。
+
+### 退出路径的真实驱动力：异常级联（重要，勿"修复"）
+
+退出时两个 TJS 异常先后发生，第二个是**退出完成的驱动力**：
+
+1. `showdate.tjs removeLayer` 读 `owner.subLayers` 抛异常——owner
+   （message0 消息层）已被游戏先行销毁。这个异常**打断了游戏的正常
+   关闭链**（之后引擎 80fps 空转僵尸态）。
+2. 我们 menu 垫片 `KRKR2WebMenuItem.finalize()` 的 `owner = void`
+   写入在半销毁对象上抛 `Member "owner" does not exist`——该异常
+   触发 kirikiri 的致命异常退出路径 → 引擎终止 → engine-quit。
+
+实验证明（本地三轮）：把 finalize 改成空实现（消除异常2）后，退出
+**永久卡死**（关闭链已断、无致命异常救场）；删除 finalize 则游戏
+menus.tjs 子类的 `super.finalize()` 落空同样抛异常（级联仍在，退出
+仍通）。**finalize 必须保留原函数体**（children.clear + parent/owner
+写入）——0007 中已加注释封存该结论。彻底干净的退出（无报错弹窗）
+需要先解决异常 1（游戏正常关闭链在 web 引擎下断掉的原因，疑与
+消息层销毁顺序/字幕层清理有关），留待后续。
+
+### 本轮实际修改
+
+- **player.js**：`krkr2webEngineQuit` 改 `stop({sync:false})`——引擎
+  关闭时 Application.cpp 自带 `FS.syncfs`，页面侧再强制同步必然与其
+  竞争同一批 IDB 事务 → 8 秒超时报"存档同步失败"（实机诊断 errors
+  实录）。修复后 errors 只剩"引擎正常退出"。
+- **0007**：finalize 函数体不变，仅加注释说明不可改。
+
+本地验证（run8，build 87b0b27a）：stopReason=engine-quit、回库 ✓、
+errors 无同步超时 ✓、alerts 免费声明 + Member owner（预期级联）。

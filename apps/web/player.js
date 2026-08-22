@@ -1018,10 +1018,13 @@
   };
   window.krkr2webEngineQuit = function () {
     // the engine terminated itself (game exit / System shutdown): stop the
-    // session cleanly instead of letting the watchdog flag it as stalled
+    // session cleanly instead of letting the watchdog flag it as stalled.
+    // No forced save sync here: the engine already flushes savedata with its
+    // own FS.syncfs during shutdown (Application.cpp), and a second syncfs
+    // would contend on the same IDB transactions until the 8s timeout.
     if (!engineSessionActive) { return; }
     errors.push("KRKR2WEB_ENGINE_QUIT 引擎正常退出");
-    stop({ sync: true, reason: "engine-quit" }).then(function () { hide(); }, function () { hide(); });
+    stop({ sync: false, reason: "engine-quit" }).then(function () { hide(); }, function () { hide(); });
   };
   setInterval(function () {
     if (!engineSessionActive || document.visibilityState !== "visible") { engineStallSince = null; return; }

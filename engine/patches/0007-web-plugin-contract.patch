@@ -1,13 +1,21 @@
 diff --git a/src/core/base/sdl2/PluginImpl.cpp b/src/core/base/sdl2/PluginImpl.cpp
 --- a/src/core/base/sdl2/PluginImpl.cpp
 +++ b/src/core/base/sdl2/PluginImpl.cpp
-@@ -1151,11 +1151,42 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
+@@ -1151,12 +1151,51 @@ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/link)
  	ttstr name = *param[0];
  
  #ifdef __EMSCRIPTEN__
  	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PLUGIN_LINK ")) + name);
 +	if(name == TJS_W("menu.dll"))
 +	{
++		// NOTE: finalize MUST stay with this exact body (children.clear +
++		// parent/owner writes). Game subclasses in menus.tjs call
++		// super.finalize(); the owner write throws on the mid-destruction
++		// object, and THAT exception drives kirikiri's fatal-exception exit
++		// path -- without it the game's close chain (already broken by the
++		// showdate.tjs teardown exception) zombies forever and the engine
++		// never quits. Verified: device build f92c650c exits cleanly through
++		// this cascade; an empty finalize stalls the exit (local repro).
 +		TVPExecuteScript(
 +			TJS_W("class KRKR2WebMenuItem {")
 +			TJS_W("var owner = void; var parent = void; var children = []; var index = -1;")
