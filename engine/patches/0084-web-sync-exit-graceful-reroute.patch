@@ -1,0 +1,26 @@
+--- a/src/core/base/sdl2/SysInitImpl.cpp
++++ b/src/core/base/sdl2/SysInitImpl.cpp
+@@ -1715,8 +1715,23 @@
+ void TVPTerminateSync(int code)
+ {
+ 	// do synchronous temination of application (never return)
++#ifdef __EMSCRIPTEN__
++	// krkr2web (patch 0084): inline TVPSystemUninit()+exit() tears down the
++	// wasm runtime (built without EXIT_RUNTIME) -- the uncaught ExitStatus
++	// surfaces as an abort and the host page reports a crash. Game scripts
++	// also call System.exit() from survivable error handlers
++	// (kirikiroid2-web observed keybinder.tjs doing this). Reroute the
++	// synchronous exit onto the async graceful path instead: the main loop
++	// observes the terminate flag on the next tick, runs TVPSystemUninit()
++	// there and notifies the host (krkr2webEngineQuit) before cancelling
++	// itself, so a script-requested exit still ends the session cleanly.
++	printf("krkr2web: System.exit(%d) rerouted to graceful async shutdown\n", code);
++	TVPTerminateAsync(code);
++	return;
++#else
+ 	TVPSystemUninit();
+ 	exit(code);
++#endif
+ }
+ //---------------------------------------------------------------------------
+ void TVPMainWindowClosed()

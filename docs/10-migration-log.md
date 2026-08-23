@@ -37,7 +37,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 | P1-1 | WebGL shader 精度修复 | P1 | **已完成**（2026-08-23，重写生效下闭环冒烟通过） |
 | P1-2 | 跨标签页引擎单例（Web Locks） | P1 | **已完成**（2026-08-23，双标签真会话验证通过） |
 | P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | **已完成**（2026-08-23） |
-| P1-4 | `TVPExitApplication` 退出对齐 | P1 | 未开始 |
+| P1-4 | `TVPExitApplication` 退出对齐 | P1 | **已完成**（2026-08-23，补丁 0084） |
 | P2-1 | UI 资源是否仍整体 preload（调研） | P2 | 未开始 |
 | P2-2 | 构建脚本 ccache / 参数化（可选） | P2 | 未开始 |
 
@@ -188,8 +188,24 @@ shared-memory 预分配降档。
 
 - 目标：非致命 `System.exit()` 不真正退出引擎。
 - 参考：`kirikiroid2-web/cpp/core/environ/web/Platform.cpp`
-- 涉及：`engine/patches/0084-web-exit-ignore.patch`、`engine/upstream.json`
-- 状态：未开始
+- 涉及：`engine/patches/0084-web-sync-exit-graceful-reroute.patch`、
+  `engine/upstream.json`
+- 状态：**已完成**（2026-08-23，补丁 0084）
+- 实现要点与参考的差异：
+  - 本引擎无 `TVPExitApplication` 定义（仅 Platform.h 声明、无人调用）；
+    实际危险路径是 `System.exit()` → `TVPTerminateSync` →
+    `TVPSystemUninit()+exit()`——无 EXIT_RUNTIME 的 wasm 里内联 exit 会以
+    uncaught ExitStatus 冒泡成 abort，宿主页面按崩溃处理。
+  - 参考实现选择完全忽略退出（游戏可继续）；本产品语义下游戏正常收尾
+    也走 System.exit，忽略会让会话吊死黑屏。故改为**改道**：web 上
+    `TVPTerminateSync` 转调 `TVPTerminateAsync`，下一 tick 由主循环拆除
+    分支（P0-1 已验证）执行 TVPSystemUninit + krkr2webEngineQuit 通知，
+    再取消主循环——同步退出永不接触 exit()，会话仍干净结束。
+  - stdout 留一行 `krkr2web: System.exit(N) rerouted ...` 便于追溯
+    （走 engineLog 信息环，不进 errors）。
+- 本轮自检（未跑全量）：build_d3.ps1 全量重建 exit 0 + 产物检查；
+  `d3_browser_smoke` exit 0（含引擎自退→主循环拆除→quit 通知链路回归）。
+  System.exit 直达路径的定向验证（临时 probe 标签）留待统一审计。
 
 ## 桌面验证约定
 
@@ -348,3 +364,15 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
   不带参零捕获。一次性脚本已删。
 - **下一步**：P1-4 TVPExitApplication 退出对齐（补丁 0084，参考
   `kirikiroid2-web/cpp/core/environ/web/Platform.cpp` 的 TVPExitApplication）。
+
+### 2026-08-23 P1-4 完成（补丁 0084 同步退出改道）
+
+- 改 `src/core/base/sdl2/SysInitImpl.cpp` 的 `TVPTerminateSync`：web 分支
+  转调 `TVPTerminateAsync`（原生分支不动）；快照/差分/往返 MATCH，
+  upstream.json 登记（80 个补丁），全量重建 + 产物检查 + 冒烟 exit 0。
+- 与参考的差异已记录：参考完全忽略 TVPExitApplication；本引擎的对应
+  危险点是 System.exit→TVPTerminateSync→exit()，选择改道异步优雅退出
+  （正常游戏收尾语义保留），统一审计时补 System.exit 直达路径的
+  定向验证。
+- **下一步**：P2-1 UI 资源 preload 调研 + P2-2 构建脚本 ccache/参数化
+  （可选），随后统一审计。
