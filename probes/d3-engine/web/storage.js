@@ -13,6 +13,14 @@
     ? 64 * 1024 * 1024
     : (deviceMemory >= 8 ? 256 * 1024 * 1024 : 128 * 1024 * 1024);
   var MAX_READ_BYTES = 64 * 1024 * 1024;
+  // krkr2web: engine reads at or above this length bypass the chunk LRU and
+  // are assembled from one direct IndexedDB transaction. Large one-shot
+  // resources (video / archive payloads) are streamed once and rarely
+  // re-read; letting their chunks enter the LRU would evict the hot
+  // prefetched voice/sprite chunks the click-next path depends on. A large
+  // read whose chunks are already fully cached still takes the cache path,
+  // so a prefetched file remains a pure hit.
+  var DIRECT_READ_THRESHOLD = 1024 * 1024;
   var ERROR_STORAGE = -5;
   var ERROR_CHUNK_MISSING = -4;
   var state = null;
@@ -24,6 +32,7 @@
     openCalls: 0, readCalls: 0, closeCalls: 0, cacheHits: 0,
     cacheMisses: 0, indexedDbBytes: 0, copiedBytes: 0,
     prefetchReads: 0, prefetchBytes: 0,
+    directReads: 0, directBytes: 0,
     maximumCacheBytes: 0, errors: []
   };
 
@@ -181,6 +190,42 @@
     return null;
   }
 
+  function allChunksCached(pkg, firstChunk, lastChunk) {
+    for (var chunkIndex = firstChunk; chunkIndex <= lastChunk; chunkIndex += 1) {
+      if (!cache.has(cacheKey(pkg, chunkIndex))) { return false; }
+    }
+    return true;
+  }
+
+  // krkr2web: cache-bypassing twin of loadChunkRange. Same single-transaction
+  // IndexedDB fetch, but the returned chunks neither populate the LRU nor
+  // touch recency of existing entries, so a large streaming read cannot
+  // evict or reorder the hot small-file chunks.
+  async function loadChunkRangeDirect(pkg, firstChunk, lastChunk) {
+    var result = [];
+    traceStart("loadChunkRangeDirect", pkg.id + ":" + firstChunk + "-" + lastChunk);
+    var database = await getDatabase();
+    try {
+      var transaction = database.transaction("chunks", "readonly");
+      var store = transaction.objectStore("chunks");
+      var requests = [];
+      for (var chunkIndex = firstChunk; chunkIndex <= lastChunk; chunkIndex += 1) {
+        requests.push(requestResult(store.get([state.gameId, state.version, pkg.id, chunkIndex])));
+      }
+      var chunks = await withTimeout(Promise.all(requests), 20000,
+        "IndexedDB chunk range " + pkg.id + ":" + firstChunk + "-" + lastChunk);
+      chunks.forEach(function (chunk, index) {
+        if (chunk instanceof ArrayBuffer) {
+          metrics.indexedDbBytes += chunk.byteLength;
+          result[index] = chunk;
+        }
+      });
+      return result;
+    } finally {
+      traceEnd();
+    }
+  }
+
   async function prepare(gameId) {
     var database = await getDatabase();
     try {
@@ -238,7 +283,14 @@
       var lastChunk = Math.floor((currentOffset + remaining - 1) / pkg.chunkSize);
       // Fetch one logical engine read in one IndexedDB transaction. Large XP3
       // entries otherwise pay a transaction round-trip for every 4 MiB chunk.
-      var chunks = await loadChunkRange(pkg, firstChunk, lastChunk);
+      var chunks;
+      if (length >= DIRECT_READ_THRESHOLD && !allChunksCached(pkg, firstChunk, lastChunk)) {
+        metrics.directReads += 1;
+        metrics.directBytes += length;
+        chunks = await loadChunkRangeDirect(pkg, firstChunk, lastChunk);
+      } else {
+        chunks = await loadChunkRange(pkg, firstChunk, lastChunk);
+      }
       while (remaining > 0) {
         var chunkIndex = Math.floor(currentOffset / pkg.chunkSize);
         var inChunk = currentOffset - chunkIndex * pkg.chunkSize;

@@ -33,7 +33,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 |---|---|---|---|
 | P0-1 | 主循环 RAF 帧率限制 | P0 | **已完成**（2026-08-23 桌面验证通过） |
 | P0-2 | `TVPGetRoughTickCount32` 软件锁相环 | P0 | **已完成**（2026-08-23，构建+引擎闭环冒烟通过） |
-| P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | 未开始 |
+| P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | **已完成**（2026-08-23，直读路径+回归冒烟通过） |
 | P1-1 | WebGL shader 精度修复 | P1 | 未开始 |
 | P1-2 | 跨标签页引擎单例（Web Locks） | P1 | 未开始 |
 | P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | 未开始 |
@@ -106,8 +106,24 @@ shared-memory 预分配降档。
 
 - 目标：`storage.js` 对 ≥1 MiB 读直接从 IndexedDB 拼装返回，不放入块 LRU。
 - 参考：`kirikiroid2-web/platforms/web/vlfs.js` 的 `DIRECT_READ_THRESHOLD`
-- 涉及：`probes/d3-engine/web/storage.js`、`apps/web/play/storage.js`（如已复制）
-- 状态：未开始
+- 涉及：`probes/d3-engine/web/storage.js`（单一源；d4/d5 产品打包时由
+  `tools/prepare_d4_product.ps1` / `prepare_d5_product.ps1` 复制为 `play/storage.js`，
+  仓库内无独立副本）
+- 状态：**已完成**（2026-08-23，直读路径验证 + 回归冒烟通过）
+- 实现要点：
+  - 阈值 `DIRECT_READ_THRESHOLD = 1 MiB`（批准计划值；参考实现用 512 KiB）。
+  - `readToHeap`：`length ≥ 阈值` 且**未整段命中缓存**时走新增的
+    `loadChunkRangeDirect`——与 `loadChunkRange` 相同的单事务 IndexedDB 取块，
+    但不 populate、不触碰 LRU 递进度，大流式读（视频/大资源）无法驱逐
+    点击下一步依赖的热门预取块。
+  - 整段已缓存的大读仍走缓存路径（预取过的大文件保持纯命中，与
+    0079/0080 预取流水线兼容）；`readRange`/`prefetchRange` 预取路径
+    保持原样（预取的目的就是暖缓存）。
+  - 新增指标 `directReads` / `directBytes`（随 snapshot 进入诊断报告）。
+- 本轮自检（未跑全量）：`node --check`；一次性持久化 profile 两阶段脚本
+  验证：冷缓存大读 directReads=1 且 cacheEntries 不变、重复大读仍直读
+  （证明未污染）、小读暖块后大读切回缓存路径（directReads 不再增长）；
+  `d3_browser_smoke` exit 0。
 
 ### 阶段 P1-1：WebGL shader 精度修复
 
@@ -244,3 +260,18 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
   `tools/prepare_d3_probe.ps1`（内容版本未变时无需重启诊断服务器）。
 - **下一步**：P0-3 大读直读不污染 LRU（`probes/d3-engine/web/storage.js`，
   参考 `kirikiroid2-web/platforms/web/vlfs.js` 的 DIRECT_READ_THRESHOLD）。
+
+### 2026-08-23 P0-3 完成（storage.js 大读直读）
+
+- 只改 `probes/d3-engine/web/storage.js`（web 侧，无引擎补丁；d4/d5 打包脚本
+  复制该文件，仓库无独立产品副本）。`DIRECT_READ_THRESHOLD = 1 MiB`（计划值，
+  参考 512 KiB）；`loadChunkRangeDirect` 单事务取块不进 LRU；整段命中缓存的
+  大读仍走缓存（预取兼容）；预取路径不动；新指标 directReads/directBytes。
+- 自检脚本坑：playwright 每次 launch 是全新 profile（IndexedDB 不跨 launch），
+  需 `launchPersistentContext` 两阶段（先装好、再冷缓存页面直调 bridge）；
+  D3 的 data.xp3 只有 3 个 chunk，完整启动即全部预热，冷缓存必须不点启动。
+- 验证结果：冷缓存 2 MiB 读 directReads=1、cacheEntries 不变；重复大读仍
+  directReads=2（未污染）；小读暖块后大读走缓存（directReads 不再增）；
+  `d3_browser_smoke` exit 0。一次性脚本已删（build/p03_direct_check.js）。
+- **下一步**：P1-1 WebGL shader 精度修复（`apps/web/player.js` /
+  `apps/web/play/app.js`，参考 `kirikiroid2-web/platforms/web/shell.html`）。
