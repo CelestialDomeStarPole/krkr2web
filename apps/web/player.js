@@ -533,6 +533,12 @@
 
   function persistEvidence() {
     var evidence = snapshot();
+    // krkr2web: fold the ?debugEarlyLogs=1 console capture (installed as the
+    // first inline script in index.html) into the persisted failure session
+    // so boot problems that predate the shell are visible in the evidence.
+    if (window.__krkr2webEarlyLogs && window.__krkr2webEarlyLogs.length) {
+      evidence.earlyLogs = window.__krkr2webEarlyLogs.slice(-200);
+    }
     try { localStorage.setItem("krkr2web-d4-last-player", JSON.stringify(evidence)); } catch (error) {}
     return evidence;
   }

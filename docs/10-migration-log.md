@@ -36,7 +36,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 | P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | **已完成**（2026-08-23，直读路径+回归冒烟通过） |
 | P1-1 | WebGL shader 精度修复 | P1 | **已完成**（2026-08-23，重写生效下闭环冒烟通过） |
 | P1-2 | 跨标签页引擎单例（Web Locks） | P1 | **已完成**（2026-08-23，双标签真会话验证通过） |
-| P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | 未开始 |
+| P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | **已完成**（2026-08-23） |
 | P1-4 | `TVPExitApplication` 退出对齐 | P1 | 未开始 |
 | P2-1 | UI 资源是否仍整体 preload（调研） | P2 | 未开始 |
 | P2-2 | 构建脚本 ccache / 参数化（可选） | P2 | 未开始 |
@@ -171,8 +171,18 @@ shared-memory 预分配降档。
 
 - 目标：`?debugEarlyLogs=1` 捕获早期 console 日志到 sessionStorage。
 - 参考：`kirikiroid2-web/platforms/web/shell.html`
-- 涉及：`apps/web/index.html`、诊断报告
-- 状态：未开始
+- 涉及：`apps/web/index.html`（head 首个内联脚本）、`apps/web/player.js`
+  （persistEvidence 并入 earlyLogs）
+- 状态：**已完成**（2026-08-23）
+- 实现要点：
+  - 与参考相同的机制：包装 console.log/warn/error，`[level] ` 前缀 +
+    参数 JSON 化，环形缓冲 5000 条，逐条镜像到
+    `sessionStorage.__krkr2webEarlyLogs`，暴露 `window.__krkr2webEarlyLogs`。
+  - 整段 try/catch 包裹（诊断开关自身绝不能影响启动）。
+  - d4 证据接入：`persistEvidence` 把 earlyLogs 尾部 200 条并入
+    `krkr2web-d4-last-player`，壳层之前的启动失败进入失败会话证据。
+- 本轮自检（未跑全量）：`node --check`；重打包 d4 后浏览器实测：
+  带参标记行进入 window 缓冲与 sessionStorage，不带参无任何捕获。
 
 ### 阶段 P1-4：TVPExitApplication 对齐
 
@@ -328,3 +338,13 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
   `--resource-map`，否则 chunk 校验过不去。
 - **下一步**：P1-3 早期日志捕获（`?debugEarlyLogs=1`，`apps/web/index.html`
   + 诊断报告，参考 shell.html）。
+
+### 2026-08-23 P1-3 完成（早期日志捕获）
+
+- `apps/web/index.html` head 首个内联脚本（styles.css 重试 link 之后、
+  其余脚本之前）装 console 包装；player.js `persistEvidence` 并入
+  earlyLogs 尾 200 条到 d4 失败会话证据。
+- 验证：带 `?debugEarlyLogs=1` 标记行入 window 缓冲 + sessionStorage；
+  不带参零捕获。一次性脚本已删。
+- **下一步**：P1-4 TVPExitApplication 退出对齐（补丁 0084，参考
+  `kirikiroid2-web/cpp/core/environ/web/Platform.cpp` 的 TVPExitApplication）。

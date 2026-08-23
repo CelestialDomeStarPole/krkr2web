@@ -7,6 +7,39 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2315191d'/%3E%3Cpath d='M20 14h8v14l12-14h10L36 30l14 20H40L28 34v16h-8z' fill='%23e7b84b'/%3E%3C/svg%3E">
   <title>KRKR2 Web</title>
   <link rel="stylesheet" href="/styles.css" onerror="if(!this.dataset.retried){this.dataset.retried=1;var retry=document.createElement('link');retry.rel='stylesheet';retry.href=this.getAttribute('href')+'&retry='+Date.now();document.head.appendChild(retry);this.remove();}">
+  <script>
+    // krkr2web: early console capture for post-mortem diagnostics. Boot
+    // failures that happen before the app shell can observe anything (engine
+    // script load, early wasm instantiation) leave no trace in the UI; with
+    // ?debugEarlyLogs=1 every console line from this point on is mirrored
+    // into sessionStorage so a support flow can read it after the fact.
+    // Same mechanism as kirikiroid2-web's shell.html.
+    (function () {
+      try {
+        if (new URLSearchParams(location.search).get("debugEarlyLogs") !== "1") { return; }
+        var logs = [];
+        function capture(level, args) {
+          var line = "[" + level + "] " + Array.prototype.map.call(args, function (arg) {
+            if (typeof arg === "string") { return arg; }
+            try { return JSON.stringify(arg); } catch (error) { return String(arg); }
+          }).join(" ");
+          logs.push(line);
+          if (logs.length > 5000) { logs.shift(); }
+          try {
+            sessionStorage.setItem("__krkr2webEarlyLogs", JSON.stringify(logs));
+          } catch (error) {}
+        }
+        window.__krkr2webEarlyLogs = logs;
+        ["log", "warn", "error"].forEach(function (level) {
+          var original = console[level];
+          console[level] = function () {
+            capture(level, arguments);
+            return original.apply(this, arguments);
+          };
+        });
+      } catch (error) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">
