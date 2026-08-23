@@ -53,6 +53,14 @@ foreach ($game in $catalog.games) {
         $descriptionCodePoints = @(0x7528,0x4E8E,0x9A8C,0x8BC1,0x901A,0x7528,0x4EA7,0x54C1,0x6D41,0x7A0B,0x7684,0x20,0x4B,0x52,0x4B,0x52,0x32,0x20,0x5C0F,0x578B,0x6E38,0x620F,0x3002,0x5305,0x542B,0x5267,0x60C5,0x3001,0x58F0,0x97F3,0x3001,0x89E6,0x6478,0x548C,0x672C,0x673A,0x5B58,0x6863,0x3002)
         $description = -join ($descriptionCodePoints | ForEach-Object { [char]$_ })
         $game | Add-Member -NotePropertyName description -NotePropertyValue $description -Force
+        # auto-catalog parity: the same metadata ships as meta.json inside the
+        # version directory so servers with --auto-catalog render identically
+        $metaDirectory = Join-Path $output (Join-Path "games" (Join-Path "d3-test" $game.version))
+        [ordered]@{
+            schemaVersion = 1
+            description = $description
+            coverUrl = "/assets/default-cover.png"
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $metaDirectory "meta.json") -Encoding UTF8
     }
 }
 $catalog | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $catalogPath -Encoding UTF8

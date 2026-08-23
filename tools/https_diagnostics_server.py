@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import functools
+import hashlib
 import http.server
 import json
 import mimetypes
@@ -22,10 +23,132 @@ REPORT_ENDPOINT = "/api/diagnostics-reports"
 MAX_REPORT_BYTES = 1024 * 1024
 COPY_BUFFER_BYTES = 1024 * 1024
 RANGE_PATTERN = re.compile(r"bytes=(\d+)-(\d*)$")
+GAME_ID_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*$")
 # Content-addressed assets stamped by tools/stamp_build_versions.py (?v=hash).
 # The exact-hash URL can never change meaning, so it may be cached forever;
 # everything else (HTML, catalog, xp3 ranges, videos) must revalidate.
 STAMPED_QUERY = re.compile(r"v=[0-9a-f]{8}")
+
+
+class GameDirectoryScanner:
+    """krkr2web: drop-in game discovery for deployments.
+
+    Games live as ``games/<gameId>/<version>/manifest.json`` — the layout
+    written by tools/generate_d2_catalog.py. The scanner derives two things
+    from that tree: a synthesized catalog served for ``/catalog.json``
+    (--auto-catalog), and resource entries (URL -> file + sha256 ETag) so
+    packages physically placed inside the site directory get the same
+    Range/206 + If-Match service as explicit --resource-map entries — the
+    chunked installer requires it, plain static serving does not provide it.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.resolve()
+        self._cached_marks: tuple[object, ...] | None = None
+        self._cached_result: tuple[dict[str, object], dict[str, dict[str, object]]] | None = None
+
+    def _walk(self) -> list[tuple[Path, Path, dict[str, int]]]:
+        games_root = self.root / "games"
+        found: list[tuple[Path, Path, dict[str, int]]] = []
+        if not games_root.is_dir():
+            return found
+        for game_dir in sorted(games_root.iterdir()):
+            if not game_dir.is_dir() or not GAME_ID_PATTERN.fullmatch(game_dir.name):
+                continue
+            for version_dir in sorted(game_dir.iterdir()):
+                if not version_dir.is_dir():
+                    continue
+                manifest_path = version_dir / "manifest.json"
+                if not manifest_path.is_file():
+                    continue
+                marks = {"manifest": manifest_path.stat().st_mtime_ns}
+                meta_path = version_dir / "meta.json"
+                if meta_path.is_file():
+                    marks["meta"] = meta_path.stat().st_mtime_ns
+                found.append((game_dir, version_dir, marks))
+        return found
+
+    def scan(self) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+        walked = self._walk()
+        marks = tuple((str(version_dir), file_marks) for _, version_dir, file_marks in walked)
+        if self._cached_result is not None and self._cached_marks == marks:
+            return self._cached_result
+        result = self._build(walked)
+        self._cached_marks = marks
+        self._cached_result = result
+        return result
+
+    def _build(self, walked: list[tuple[Path, Path, dict[str, int]]]) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
+        by_game: dict[str, list[tuple[int, Path, Path]]] = {}
+        for game_dir, version_dir, file_marks in walked:
+            by_game.setdefault(game_dir.name, []).append(
+                (file_marks["manifest"], version_dir / "manifest.json", version_dir)
+            )
+        games: dict[str, dict[str, object]] = {}
+        resources: dict[str, dict[str, object]] = {}
+        for game_id, candidates in by_game.items():
+            # several version directories may coexist (immutable content
+            # versions); the manifest generated or copied last wins
+            _, manifest_path, version_dir = max(candidates, key=lambda item: (item[0], item[1].parent.name))
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                print(f"Auto-catalog: skipping unreadable manifest {manifest_path}: {error}")
+                continue
+            packages = manifest.get("packages")
+            required_bytes = manifest.get("requiredBytes")
+            if (
+                manifest.get("gameId") != game_id
+                or manifest.get("version") != version_dir.name
+                or not isinstance(packages, list)
+                or not packages
+                or not isinstance(required_bytes, int)
+                or required_bytes <= 0
+            ):
+                print(f"Auto-catalog: skipping {version_dir} (gameId/version/packages inconsistent)")
+                continue
+            meta: dict[str, object] = {}
+            meta_path = version_dir / "meta.json"
+            if meta_path.is_file():
+                try:
+                    loaded = json.loads(meta_path.read_text(encoding="utf-8-sig"))
+                    if isinstance(loaded, dict):
+                        meta = loaded
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    meta = {}
+            entry: dict[str, object] = {
+                "gameId": game_id,
+                "title": str(meta.get("title") or manifest.get("title") or game_id),
+                "version": version_dir.name,
+                "manifestUrl": f"/games/{game_id}/{version_dir.name}/manifest.json",
+                "requiredBytes": required_bytes,
+                "compatibility": str(meta.get("compatibility") or "development"),
+            }
+            if isinstance(meta.get("coverUrl"), str) and meta["coverUrl"]:
+                entry["coverUrl"] = meta["coverUrl"]
+            if isinstance(meta.get("description"), str) and meta["description"]:
+                entry["description"] = meta["description"]
+            games[game_id] = entry
+            for package in packages:
+                if not isinstance(package, dict):
+                    continue
+                url = package.get("url")
+                size = package.get("size")
+                sha256 = package.get("sha256")
+                if not (isinstance(url, str) and url.startswith("/")
+                        and isinstance(size, int) and isinstance(sha256, str) and len(sha256) == 64):
+                    continue
+                source = (self.root / url.lstrip("/")).resolve()
+                if not source.is_relative_to(self.root):
+                    continue
+                resources[url] = {"source": str(source), "size": size, "etag": f'"sha256-{sha256}"'}
+        seed = "|".join(f"{game_id}:{games[game_id]['version']}" for game_id in sorted(games))
+        catalog = {
+            "schemaVersion": 1,
+            "catalogVersion": "catalog-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16],
+            "games": [games[game_id] for game_id in sorted(games)],
+        }
+        return catalog, resources
 
 
 class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
@@ -53,12 +176,16 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         resource_map: dict[str, dict[str, object]] | None = None,
         video_directory: str | None = None,
         savedata_directory: str | None = None,
+        catalog_scanner: GameDirectoryScanner | None = None,
+        auto_catalog: bool = False,
         **kwargs: object,
     ) -> None:
         self.report_directory = Path(report_directory)
         self.resource_map = resource_map or {}
         self.video_directory = Path(video_directory).resolve() if video_directory else None
         self.savedata_directory = Path(savedata_directory).resolve() if savedata_directory else None
+        self.catalog_scanner = catalog_scanner
+        self.auto_catalog = auto_catalog
         super().__init__(*args, **kwargs)
 
     def translate_path(self, path: str) -> str:
@@ -111,7 +238,33 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         getattr(super(), method)()
 
     def _resource_entry(self) -> dict[str, object] | None:
-        return self.resource_map.get(urlsplit(self.path).path)
+        path = urlsplit(self.path).path
+        # explicit --resource-map wins; auto-derived entries (packages placed
+        # physically under games/) fill the gaps so both layouts work
+        entry = self.resource_map.get(path)
+        if entry is not None:
+            return entry
+        if self.catalog_scanner is not None:
+            return self.catalog_scanner.scan()[1].get(path)
+        return None
+
+    def _serve_synthesized_catalog(self, head_only: bool) -> bool:
+        if not (self.auto_catalog and urlsplit(self.path).path == "/catalog.json"):
+            return False
+        assert self.catalog_scanner is not None
+        catalog, _ = self.catalog_scanner.scan()
+        if not catalog["games"]:
+            # nothing discovered: keep serving a static catalog if present
+            if Path(self.translate_path("/catalog.json")).is_file():
+                return False
+        payload = (json.dumps(catalog, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        self.send_response(http.HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(payload)
+        return True
 
     def _serve_resource(self, head_only: bool) -> None:
         entry = self._resource_entry()
@@ -279,6 +432,8 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        if self._serve_synthesized_catalog(head_only=False):
+            return
         if self._resource_entry() is not None:
             self._serve_resource(head_only=False)
             return
@@ -289,6 +444,8 @@ class DiagnosticsHandler(http.server.SimpleHTTPRequestHandler):
         self._serve_or_redirect("do_GET")
 
     def do_HEAD(self) -> None:
+        if self._serve_synthesized_catalog(head_only=True):
+            return
         if self._resource_entry() is not None:
             self._serve_resource(head_only=True)
             return
@@ -434,12 +591,20 @@ def main() -> None:
         help="optional directory served under /savedata-import/ (cleared saves for browser import)",
     )
     parser.add_argument("--http", action="store_true", help="local automated QA only; do not use for device testing")
+    parser.add_argument(
+        "--auto-catalog",
+        action="store_true",
+        help="serve /catalog.json synthesized from games/<gameId>/<version>/manifest.json "
+        "(drop-in game deployment; per-game meta.json may override title/description/coverUrl/compatibility)",
+    )
     args = parser.parse_args()
 
     directory = args.directory.resolve()
     report_directory = args.reports_directory.resolve()
     if not directory.is_dir():
         raise SystemExit(f"Diagnostics directory does not exist: {directory}")
+
+    catalog_scanner = GameDirectoryScanner(directory)
 
     resource_map: dict[str, dict[str, object]] = {}
     if args.resource_map is not None:
@@ -473,6 +638,8 @@ def main() -> None:
         resource_map=resource_map,
         video_directory=str(args.video_directory.resolve()) if args.video_directory else None,
         savedata_directory=str(args.savedata_directory.resolve()) if args.savedata_directory else None,
+        catalog_scanner=catalog_scanner,
+        auto_catalog=args.auto_catalog,
     )
     server = http.server.ThreadingHTTPServer((args.bind, args.port), handler)
     scheme = "http" if args.http else "https"
@@ -491,6 +658,11 @@ def main() -> None:
     print(f"Saving uploaded reports to {report_directory}")
     if resource_map:
         print(f"Serving {len(resource_map)} mapped large resources with HTTP Range")
+    if args.auto_catalog:
+        discovered = catalog_scanner.scan()[0]["games"]
+        print(f"Auto-catalog enabled: {len(discovered)} game(s) discovered under games/")
+    else:
+        print("Auto-derived package entries under games/: enabled (catalog synthesis off)")
     print(f"Listening on {scheme}://{args.bind}:{args.port}/")
     print("Press Ctrl+C to stop")
     try:

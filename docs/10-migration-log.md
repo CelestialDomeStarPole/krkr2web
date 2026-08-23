@@ -504,3 +504,49 @@ readCalls 恒 0，建议随心跳刷新）。
 P0-4（System.exit 优雅改道）与 P1-1（shader 精度）不依赖网络形态，沿用
 统一审计的直接验证结论；离线 worker 启动（本轮回补修复）已在 TLS 端点
 复验通过。favicon.ico 404 为浏览器自动请求的既有小噪音，不影响断言。
+
+## 2026-08-23 多游戏部署：游戏库自动识别与存档隔离
+
+需求：实际部署中把游戏放进指定目录即可被游戏库自动识别（按文件夹区分）；
+浏览器端存档按游戏隔离（IndexedDB）。
+
+改动：
+
+1. `tools/https_diagnostics_server.py`：新增 `GameDirectoryScanner` 与
+   `--auto-catalog`——`/catalog.json` 由 `games/<gameId>/<version>/manifest.json`
+   实时合成（mtime 指纹缓存，目录变动刷新即生效）；同游戏多版本目录取
+   manifest mtime 最新；版本目录内 `meta.json` 可覆盖
+   title/description/coverUrl/compatibility；无发现时回落静态 catalog.json；
+   开关关闭时行为不变。物理放置于版本目录的 XP3 依据 manifest 自动获得
+   206 Range + sha256 ETag + If-Match 服务（分块安装器契约），显式
+   resource-map 条目优先。
+2. `tools/generate_d2_catalog.py`：catalog 与 resource-map 改为合并模式
+   （替换本游戏旧版本条目、保留其他游戏条目）；新增 `--description` /
+   `--cover-url` 同时写入版本目录 meta.json 与 catalog 条目。
+3. `tools/prepare_d4_product.ps1`：d3-test 元数据同步写 meta.json（443 端点
+   `--auto-catalog` 渲染与静态 catalog 一致）。
+4. `apps/web/player.js`：`start()` 切换不同 gameId 时先优雅停止当前会话
+   （同步存档、释放单例锁，stopReason=switch-game）再启动——修复多游戏库
+   下"返回游戏库→启动另一游戏"撞单例锁、要求手动强停的缺口。
+5. 存档隔离（既有机制核实为完整，无需改动）：`-datapath=/savedata/<gameId>/`、
+   IDBFS 挂载 gameRoot=`/savedata/<gameId>`（worker 与 baseline 同路径）、
+   存档管理器按独立 IndexedDB 库 `/savedata/<gameId>` + 前缀过滤读写删。
+
+验证（全部通过）：
+
+- `python -m unittest tests.test_auto_catalog` 9/9：发现与字段合成、多游戏
+  排序与 catalogVersion 变化、最新版本胜出、meta 覆盖、坏清单跳过、
+  manifest 变更缓存刷新、HTTP 集成（合成 catalog + 物理包 206/Content-Range/
+  ETag/错误 If-Match 412）、空发现回落静态、开关关闭保持静态。
+- 新增 `tests/d4_multi_game_audit.js`（iso-check 克隆包 + 物理放置 +
+  `--auto-catalog` 服务器，测试站点重建命令见脚本头注释）：自动发现 2 游戏
+  2 卡片、meta 标题生效、物理包完整安装（自动派生 Range）、两游戏存档各自
+  只列自己的存档、`indexedDB.databases()` 显示 /savedata/d3-test 与
+  /savedata/iso-check 两个独立库、删除 A 游戏存档不影响 B。
+- 回归：443 端点重启为 `--auto-catalog` 模式后 `d4_https_optimization_audit`
+  全阶段通过（worker 变体、单例、直读、断网零请求）；`d4_browser_smoke`
+  基线全流程 exit 0；`prepare_d4_product.ps1` 重建 + `check_d4_artifacts`
+  通过。
+
+已知边界：Git Bash 下 `--cover-url /assets/...` 会被 MSYS 转成 Windows 路径，
+命令前加 `MSYS_NO_PATHCONV=1` 或改用双斜杠；文档已注明。

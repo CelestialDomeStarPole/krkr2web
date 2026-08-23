@@ -70,6 +70,52 @@ def write_json(path: Path, value: object) -> None:
     os.replace(temporary, path)
 
 
+def load_json_or_none(path: Path) -> object | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def merged_catalog(catalog_path: Path, entry: dict[str, object]) -> dict[str, object]:
+    # krkr2web: deployments host many games in one site; generating a game
+    # must merge into the existing catalog instead of replacing it. Stale
+    # versions of this game are dropped, other games are preserved.
+    existing = load_json_or_none(catalog_path)
+    games = []
+    if isinstance(existing, dict) and isinstance(existing.get("games"), list):
+        games = [game for game in existing["games"]
+                 if isinstance(game, dict) and game.get("gameId") != entry["gameId"]]
+    games.append(entry)
+    games.sort(key=lambda game: str(game.get("gameId", "")))
+    seed = "|".join(f"{game.get('gameId')}:{game.get('version')}" for game in games)
+    return {
+        "schemaVersion": 1,
+        "catalogVersion": "catalog-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16],
+        "games": games,
+    }
+
+
+def merged_resource_map(map_path: Path, game_id: str, resources: list[dict[str, object]]) -> dict[str, object]:
+    # keep other games' mappings (and any non-game mappings); replace every
+    # version previously registered for this game
+    existing = load_json_or_none(map_path)
+    kept: list[dict[str, object]] = []
+    if isinstance(existing, dict) and isinstance(existing.get("resources"), list):
+        own_prefix = f"/games/{game_id}/"
+        kept = [resource for resource in existing["resources"]
+                if not (isinstance(resource, dict) and str(resource.get("url", "")).startswith(own_prefix))]
+    merged = {str(resource.get("url", "")): resource for resource in kept}
+    for resource in resources:
+        merged[str(resource["url"])] = resource
+    return {
+        "schemaVersion": 1,
+        "resources": [merged[url] for url in sorted(merged)],
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game-id", required=True)
@@ -81,6 +127,8 @@ def main() -> None:
     parser.add_argument("--resource-map-output", type=Path, required=True)
     parser.add_argument("--metadata-output", type=Path, required=True)
     parser.add_argument("--compatibility", default="development")
+    parser.add_argument("--description", help="user-facing description stored in meta.json and the catalog entry")
+    parser.add_argument("--cover-url", help="cover image URL stored in meta.json and the catalog entry")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -153,21 +201,30 @@ def main() -> None:
     manifest_path = args.web_output / base_url.removeprefix("/") / "manifest.json"
     write_json(manifest_path, manifest)
 
-    catalog_version_seed = f"{args.game_id}:{version}".encode("utf-8")
-    catalog = {
-        "schemaVersion": 1,
-        "catalogVersion": "catalog-" + hashlib.sha256(catalog_version_seed).hexdigest()[:16],
-        "games": [{
-            "gameId": args.game_id,
-            "title": args.title,
-            "version": version,
-            "manifestUrl": f"{base_url}/manifest.json",
-            "requiredBytes": required_bytes,
-            "compatibility": args.compatibility,
-        }],
+    # meta.json feeds the server-side auto-catalog (--auto-catalog); the same
+    # values also land in the static catalog entry for servers without it
+    if args.description is not None or args.cover_url is not None:
+        meta: dict[str, object] = {"schemaVersion": 1, "gameId": args.game_id, "version": version}
+        if args.description is not None:
+            meta["description"] = args.description
+        if args.cover_url is not None:
+            meta["coverUrl"] = args.cover_url
+        write_json(args.web_output / base_url.removeprefix("/") / "meta.json", meta)
+
+    catalog_entry: dict[str, object] = {
+        "gameId": args.game_id,
+        "title": args.title,
+        "version": version,
+        "manifestUrl": f"{base_url}/manifest.json",
+        "requiredBytes": required_bytes,
+        "compatibility": args.compatibility,
     }
-    write_json(args.web_output / "catalog.json", catalog)
-    write_json(args.resource_map_output, {"schemaVersion": 1, "resources": resources})
+    if args.description is not None:
+        catalog_entry["description"] = args.description
+    if args.cover_url is not None:
+        catalog_entry["coverUrl"] = args.cover_url
+    write_json(args.web_output / "catalog.json", merged_catalog(args.web_output / "catalog.json", catalog_entry))
+    write_json(args.resource_map_output, merged_resource_map(args.resource_map_output, args.game_id, resources))
     write_json(args.metadata_output, {
         "schemaVersion": 1,
         "gameId": args.game_id,

@@ -1005,12 +1005,24 @@
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(gameId)) { return Promise.reject(new Error("游戏标识无效")); }
     var audioContext = createGestureAudioContext(false);
     if (moduleInstance) {
-      if (activeGameId !== gameId) { return Promise.reject(new Error("请先强制停止当前游戏，再切换另一款游戏")); }
+      if (activeGameId !== gameId) {
+        // krkr2web: switching to another game from a multi-game library stops
+        // the running session gracefully first — its saves are synced and the
+        // engine lock released — instead of dead-ending on a manual force
+        // stop. Same-tab switch; a second tab still hits the singleton guard.
+        return stop({ sync: !crashed, reason: "switch-game" }).then(function () {
+          return beginStart(gameId, title, audioContext);
+        });
+      }
       if (crashed) { return restart(gameId, title, createGestureAudioContext(true)); }
       show();
       return Promise.resolve(snapshot());
     }
     if (startPromise) { return startPromise; }
+    return beginStart(gameId, title, audioContext);
+  }
+
+  function beginStart(gameId, title, audioContext) {
     pendingAudioContext = audioContext;
     startPromise = startFresh(gameId, title, audioContext);
     return startPromise.then(function (value) {

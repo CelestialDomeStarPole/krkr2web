@@ -8,9 +8,27 @@ web 全文无游戏名/厂商名），逐游戏内容只存在于 `engine/profil
 
 1. **静态扫描**：`python tools/scan_xp3_compat.py` 扫描游戏的 XP3——条目数、
    脚本可解码性、媒体类型分布、提及的 DLL 插件。据此评估插件缺口。
-2. **清单生成**：`tools/prepare_d2_probe.ps1` / `tools/generate_d2_catalog.py`
-   生成 catalog 与 manifest（4 MiB 分块、逐块 SHA-256）。发布前游戏放置到
-   `参考资料/<游戏>/` 并接入 resource-map。
+2. **清单生成并放入站点**：`tools/generate_d2_catalog.py` 生成 manifest
+   （4 MiB 分块、逐块 SHA-256）并直接写入站点目录——`catalog.json` 与
+   `resource-map.json` 都是**合并式**（替换本游戏旧版本、保留其他游戏）：
+
+   ```
+   python tools/generate_d2_catalog.py \
+     --game-id <id> --title <标题> --engine-profile <id>-v1 \
+     --source-directory <游戏目录> --package data.xp3 \
+     --web-output <站点根> \
+     --resource-map-output <站点根>/resource-map.json \
+     --metadata-output <站点根>/games/<id>-hashes.json \
+     --description <面向用户的描述> --cover-url /assets/<封面>.png
+   ```
+
+   XP3 实体两种放法：**物理放置**（拷贝到版本目录
+   `games/<id>/<版本>/data.xp3`，本仓库服务器会依据 manifest 自动提供
+   分块安装所需的 206 Range + sha256 ETag）或 **resource-map 映射**
+   （大文件留在站点外，服务器 `--resource-map` 指向）。`--description`
+   与 `--cover-url` 同时写入版本目录的 `meta.json` 供自动目录使用。
+   注意 Git Bash 会把 `/assets/...` 参数转成 Windows 路径，命令前加
+   `MSYS_NO_PATHCONV=1`。
 3. **引擎 profile**：在 `engine/profiles/<gameId>-v1.json` 定义（由
    `tools/generate_engine_profiles.py` 生成 `engine-profiles.js` 注入产品）：
    - `entryPackage` / `requiredPackages` / `autoPathPackages`：入口与自动搜索
@@ -29,6 +47,24 @@ web 全文无游戏名/厂商名），逐游戏内容只存在于 `engine/profil
    播放，无钩子/无转码文件时保持"跳过"行为。
 5. **实机验证**：完整下载 → 断网启动 → 标题/剧情/存读档 → 场景回想/鉴赏 →
    稳定性；报告归档，结论回填 [验证记录](09-verification-log.md)。
+
+## 部署与游戏库自动识别
+
+- 服务器加 `--auto-catalog` 后，`/catalog.json` 由
+  `games/<gameId>/<version>/manifest.json` **实时合成**（按 mtime 指纹缓存，
+  目录一变、刷新页面即生效）——把游戏文件夹放进 `games/` 就会出现在游戏库，
+  无需手工维护 catalog。同一游戏存在多个版本目录时取 manifest 最新的一个。
+- 版本目录内的 `meta.json` 可覆盖 `title` / `description` / `coverUrl` /
+  `compatibility`；未提供时使用 manifest 标题与默认封面。
+- 物理放置的 XP3 自动获得与 resource-map 完全一致的 Range/ETag/If-Match
+  服务（显式 resource-map 条目优先）；换 nginx/caddy 等原生 Range 服务器
+  时物理放置同样可行。
+- 浏览器端存档隔离（既有机制，已由 `tests/d4_multi_game_audit.js` 实测）：
+  引擎以 `-datapath=/savedata/<gameId>/` 运行，IDBFS 挂载在
+  `/savedata/<gameId>`——每个游戏一个独立 IndexedDB 数据库；存档管理器按
+  `/savedata/<gameId>/` 前缀读写删，互相不可见。在游戏库切换游戏时，
+  玩家会先优雅停止当前会话（同步该游戏存档、释放引擎单例锁）再启动新游戏。
+
 
 ## 媒体格式事实（《千恋万花》实测，对同类商业 KRKR2 游戏普遍适用）
 
