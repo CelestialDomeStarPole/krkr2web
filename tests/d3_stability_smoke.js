@@ -5,11 +5,11 @@ const { chromium } = require("playwright");
 async function main() {
   const url = process.argv[2] || "http://127.0.0.1:8767/?gameId=d3-test&soakSeconds=5";
   const executablePath = process.env.KRKR2_CHROME_PATH || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath,
-    args: ["--autoplay-policy=no-user-gesture-required"]
-  });
+  // https:// bases point at the self-signed device-grade endpoints; bypass
+  // cert errors at launch level so every page inherits it.
+  const launchArgs = ["--autoplay-policy=no-user-gesture-required"];
+  if (url.indexOf("https://") === 0) { launchArgs.push("--ignore-certificate-errors"); }
+  const browser = await chromium.launch({ headless: true, executablePath, args: launchArgs });
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
   const consoleLines = [];

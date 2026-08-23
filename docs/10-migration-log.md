@@ -456,3 +456,51 @@ readCalls 恒 0，建议随心跳刷新）。
 
 **迁移项目收口**：P0-1～P2-2 全部完成，补丁 0082/0083/0084 已登记
 （upstream.json 共 80 个），统一审计通过。
+
+## 2026-08-23 真实 TLS 端点复核（192.168.137.1:443，自签证书）
+
+应用户要求，在真实 HTTPS 部署形态（热点网卡 + 默认 443 端口 + 自签
+证书）下复核整轮优化效果。
+
+工具链：
+
+- 证书：`certs/`（开发 CA，SAN 含 192.168.137.1/localhost/127.0.0.1，
+  `tools/generate_dev_certificate.py` 产物，有效期至 2027-08）。
+- 服务器：`tools/https_diagnostics_server.py` ×2 ——
+  `192.168.137.1:443`（build/d4-product + resource-map，供手机/设备直连
+  `https://192.168.137.1/`）、`192.168.137.1:8443`（build/d3-engine +
+  resource-map，供 d3 冒烟）。
+- 新增 `tests/d4_https_optimization_audit.js`：产品级黑盒审计（单浏览器
+  上下文五阶段：TLS 完整性/安装/单例/直读/断网）。`d3_frame_limit_smoke`
+  与 `d3_stability_smoke` 增加 https 基址支持（URL 为 https 时 launch 级
+  追加 `--ignore-certificate-errors`）。
+
+结果全部通过（`build/d4-https-audit/report.json` + 5 张截图）：
+
+1. **TLS 完整性 + P1-3**：22 个首屏请求全 https、无混合内容，版式与
+   目录正常；`?debugEarlyLogs=1` 捕获管线验证通过（级别前缀齐全）。
+2. **HTTPS 安装**：8.88 MiB 游戏（resource-map Range）完整下载，离线
+   资产就绪。
+3. **P1-2 跨标签页单例**：tab1 运行引擎时 tab2 `locks.query()` 可见
+   `krkr2web-engine-instance`（exclusive）；tab2 启动被拒（状态条"引擎
+   已在其他标签页运行"）且 tab1 不受扰；关闭 tab1 后锁自动释放，tab2
+   重新启动 worker 引擎成功。
+4. **P0-3 大读直读**（页内注入产品 storage 桥实测，4 MiB chunk）：首
+   次 4 MiB 大读走直读（LRU 0 条、0 miss/0 hit）；小读正常进 LRU；重复
+   小读命中；已缓存大读改走缓存（directReads 不增、hits+1）；尾部
+   4 MiB 大读再走直读（directReads=2，LRU 仍 1 条）——"大读不污染
+   LRU、预取块保持纯命中"逐条验证。
+5. **断网零请求（worker 变体）**：Chrome 离线仿真下启动 worker 引擎：
+   0 个服务器请求、phase=running、1.6s 窗内心跳推进；离线点击推进剧情
+   （D3_MOUSE_DOWN/HEARTBEAT 1–3）；强制终止干净返回
+   （forcedStopCount=1，仍 0 请求）。出现 "Worker fatal" 即判失败（未
+   出现）。
+6. **P0-1 帧率限制（8443）**：?fps=10 / 默认 / 全局覆盖 30 → 实测
+   10.00 / 19.98 / 29.97 ticks/s，门控 skip 数（613/534/488）远超执行
+   数，限流真实生效。
+7. **P0-2 tick 稳定性（8443）**：稳定性冒烟全部门禁通过，活跃期最大
+   心跳间隙 258.7 ms，报告经 TLS 上传成功（20260823-073232-a4acf4b4）。
+
+P0-4（System.exit 优雅改道）与 P1-1（shader 精度）不依赖网络形态，沿用
+统一审计的直接验证结论；离线 worker 启动（本轮回补修复）已在 TLS 端点
+复验通过。favicon.ico 404 为浏览器自动请求的既有小噪音，不影响断言。
