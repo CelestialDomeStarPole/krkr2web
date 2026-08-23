@@ -109,11 +109,13 @@ function d3ProbePumpKag()
             Debug.message("KRKR2WEB_D3_KAG_CHOICE", "left", "right");
             return;
         } else if(name == "checkpoint") {
+            // Keep pumping: KAGParser.store() captures a position that makes
+            // restore() re-enter this tag, so stopping here would wedge the
+            // conductor before the *restored* probe tag ever runs.
             d3ProbeStage = "checkpoint";
             d3ProbeBranch = tag.branch;
             d3ProbeSaveKag(tag.branch);
             d3ProbeDraw();
-            return;
         } else if(name == "end") {
             d3ProbeStage = "restored";
             d3ProbeDraw();

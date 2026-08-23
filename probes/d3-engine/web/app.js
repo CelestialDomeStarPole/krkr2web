@@ -1,6 +1,23 @@
 (function () {
   "use strict";
 
+  // The engine delivers TJS Debug.message tags (KRKR2WEB_*) to the raw
+  // browser console through its emval bridge; Module.print only carries
+  // C++ stdout. Forward tagged console lines into record() so the state
+  // machine observes them.
+  var nativeConsoleLog = console.log.bind(console);
+  console.log = function () {
+    var joined = "";
+    for (var i = 0; i < arguments.length; i += 1) {
+      var part = arguments[i];
+      joined += (i ? ", " : "") + (typeof part === "string" ? part : String(part));
+    }
+    if (joined.indexOf("KRKR2WEB_") !== -1) {
+      record("console", joined);
+    }
+    return nativeConsoleLog.apply(null, arguments);
+  };
+
   var REPORT_ENDPOINT = "/api/diagnostics-reports";
   var params = new URLSearchParams(location.search);
   var gameId = params.get("gameId") || "d3-test";

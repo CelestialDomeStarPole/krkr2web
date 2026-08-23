@@ -1,0 +1,182 @@
+diff --git a/src/core/sdl2/SDLApplication.cpp b/src/core/sdl2/SDLApplication.cpp
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -3026,6 +3026,80 @@
+ }
+ #endif
+ 
++// krkr2web (patch 0082): frame-rate gate for the RAF-driven main loop.
++//
++// The single-threaded web build pumps the whole engine (timers, sound
++// buffers, KAG idle) from emscripten_set_main_loop at display rate, which
++// wastes most ticks: the target form factor renders ~20 FPS. RAF stays the
++// sole scheduler, but its display-synced timestamp feeds an accumulator so
++// the engine ticks at a target rate with fractional-remainder carry (same
++// policy as the upstream kirikiroid2-web main-loop fix, minus the JSPI
++// wrapper). Sound streams below a low-water mark of queued buffer units
++// bypass the gate so throttling cannot cause audio underruns. See
++// docs/10-migration-log.md (P0-1).
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++#define TVPWEB_FRAME_GATE_DEFAULT_FPS 20.0
++#define TVPWEB_FRAME_GATE_AUDIO_LOW_WATER_BUFFERS 4
++
++// Defined in sound/sdl2/OpenALWaveMixer.cpp (same patch).
++bool TVPWebAudioRemainBelow(int threshold);
++
++static double TVPWebFrameGateInterval = 1000.0 / TVPWEB_FRAME_GATE_DEFAULT_FPS;
++static double TVPWebFrameGateLastTimestamp = -1;
++static double TVPWebFrameGateAccumulated = 0;
++
++static double TVPWebNowMS()
++{
++	// Prefer the RAF callback timestamp captured by the wrapper installed
++	// in krkrsdl2_run_main_loop; worker builds fall back to performance.now().
++	return EM_ASM_DOUBLE(
++	{
++		var t = globalThis.__tvpRafT;
++		return (typeof t == "number" && t >= 0) ? t : performance.now();
++	});
++}
++
++static void process_events_frame_gated()
++{
++	double timestamp = TVPWebNowMS();
++	if (TVPWebFrameGateLastTimestamp < 0)
++	{
++		TVPWebFrameGateLastTimestamp = timestamp;
++		process_events();
++		return;
++	}
++	double elapsed = timestamp - TVPWebFrameGateLastTimestamp;
++	TVPWebFrameGateLastTimestamp = timestamp;
++	if (!(elapsed >= 0) || elapsed > 1000)
++	{
++		// Do not replay frames accumulated while the tab was suspended.
++		TVPWebFrameGateAccumulated = 0;
++		process_events();
++		return;
++	}
++	TVPWebFrameGateAccumulated += elapsed;
++	if (TVPWebFrameGateAccumulated + 0.001 < TVPWebFrameGateInterval &&
++		!TVPWebAudioRemainBelow(TVPWEB_FRAME_GATE_AUDIO_LOW_WATER_BUFFERS))
++	{
++		EM_ASM({ globalThis.krkr2webFrameGateSkips = (globalThis.krkr2webFrameGateSkips | 0) + 1; });
++		return;
++	}
++	// Consume one due frame, drop whole frames backlogged during a stall and
++	// keep the fractional remainder for stable non-divisor rates.
++	TVPWebFrameGateAccumulated -= TVPWebFrameGateInterval;
++	if (TVPWebFrameGateAccumulated < 0)
++	{
++		TVPWebFrameGateAccumulated = 0;
++	}
++	while (TVPWebFrameGateAccumulated >= TVPWebFrameGateInterval)
++	{
++		TVPWebFrameGateAccumulated -= TVPWebFrameGateInterval;
++	}
++	EM_ASM({ globalThis.krkr2webFrameGateTicks = (globalThis.krkr2webFrameGateTicks | 0) + 1; });
++	process_events();
++}
++#endif
++
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+ static void process_events()
+ #else
+@@ -3220,7 +3294,48 @@
+ void krkrsdl2_run_main_loop(void)
+ {
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+-	emscripten_set_main_loop(process_events, 0, 0);
++	// krkr2web (patch 0082): install the RAF timestamp capture before
++	// setMainLoop schedules its first callback so the frame gate and the
++	// tick phase lock (docs/10-migration-log.md P0-2) observe true
++	// display-synced timestamps starting with the very first frame.
++	EM_ASM(
++	{
++		if (globalThis.__tvpRafWrapped) return;
++		globalThis.__tvpRafWrapped = 1;
++		globalThis.__tvpRafT = -1;
++		var requestRaf = globalThis.requestAnimationFrame;
++		if (typeof requestRaf != "function") return;
++		requestRaf = requestRaf.bind(globalThis);
++		globalThis.requestAnimationFrame = function(callback)
++		{
++			return requestRaf(function(timestamp)
++			{
++				globalThis.__tvpRafT = timestamp;
++				callback(timestamp);
++			});
++		};
++	});
++	TVPWebFrameGateInterval = 1000.0 / EM_ASM_DOUBLE(
++	{
++		var fps = 20;
++		try
++		{
++			var requested = globalThis.krkr2webTargetFps;
++			if (!(typeof requested == "number" && isFinite(requested) && requested > 0) &&
++				typeof location == "object" && location && location.search)
++			{
++				requested = Number(new URLSearchParams(location.search).get("fps"));
++			}
++			if (typeof requested == "number" && isFinite(requested) && requested > 0)
++			{
++				fps = requested;
++			}
++		}
++		catch (e) { }
++		globalThis.krkr2webFrameGateFps = fps;
++		return fps;
++	});
++	emscripten_set_main_loop(process_events_frame_gated, 0, 0);
+ #else
+ 	while (process_events());
+ #endif
+diff --git a/src/core/sound/sdl2/OpenALWaveMixer.h b/src/core/sound/sdl2/OpenALWaveMixer.h
+--- a/src/core/sound/sdl2/OpenALWaveMixer.h
++++ b/src/core/sound/sdl2/OpenALWaveMixer.h
+@@ -38,3 +38,6 @@
+ 	virtual void SetPosition(float x, float y, float z) {}
+ };
+ iTVPSoundBuffer* TVPCreateSoundBuffer(tTVPWaveFormat &fmt, int bufcount);
++// krkr2web (patch 0082): main-loop frame-gate probe; true when any playing
++// stream queues fewer than `threshold` unprocessed buffer units.
++bool TVPWebAudioRemainBelow(int threshold);
+diff --git a/src/core/sound/sdl2/OpenALWaveMixer.cpp b/src/core/sound/sdl2/OpenALWaveMixer.cpp
+--- a/src/core/sound/sdl2/OpenALWaveMixer.cpp
++++ b/src/core/sound/sdl2/OpenALWaveMixer.cpp
+@@ -406,6 +406,19 @@
+ 	{
+ 		return _context;
+ 	}
++
++	// krkr2web (patch 0082): low-water probe for the main-loop frame gate.
++	bool AnyStreamRemainBelow(int threshold)
++	{
++		for (tTVPSoundBuffer *stream : _streams)
++		{
++			if (stream->IsPlaying() && stream->GetRemainBuffers() < threshold)
++			{
++				return true;
++			}
++		}
++		return false;
++	}
+ };
+ 
+ void tTVPSoundBuffer::CheckALError(const char *funcname)
+@@ -456,3 +469,14 @@
+ #endif
+ 	return stream;
+ }
++
++bool TVPWebAudioRemainBelow(int threshold)
++{
++#ifndef TVP_FAUDIO_IMPLEMENT
++	if (TVPAudioRenderer)
++	{
++		return TVPAudioRenderer->AnyStreamRemainBelow(threshold);
++	}
++#endif
++	return false;
++}

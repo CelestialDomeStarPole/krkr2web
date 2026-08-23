@@ -198,9 +198,13 @@ async function main() {
     }
     await waitForBoot(page);
     try {
+      // The restored KAG text phase is emitted a few engine ticks after the
+      // save-restore tag; wait for it explicitly so sampling cannot land
+      // between the two events (frame gate widens that window).
       await page.waitForFunction(function () {
         var report = window.d3ProbeReport && window.d3ProbeReport();
-        return report && report.results.interactive.saveRestored;
+        return report && report.results.interactive.saveRestored
+          && report.results.interactive.kag.textPhases.indexOf("restored") !== -1;
       }, null, { timeout: 15000 });
     } catch (error) {
       throw new Error("D3 save restore timeout: " + JSON.stringify(await readPage(page)) + "\n" + consoleLines.join("\n") + "\n" + error.message);
