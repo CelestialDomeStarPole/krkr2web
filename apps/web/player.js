@@ -562,6 +562,47 @@
     notifyState();
   }
 
+  // krkr2web: cross-tab engine singleton via Web Locks. Two engine instances
+  // on one origin would fight over the shared IndexedDB resource database and
+  // the save space. The lock is held only while a session is active:
+  // terminateInstance() releases it and a restart re-acquires through its own
+  // startFresh(). Locks are tied to the document, so a closed or crashed tab
+  // releases automatically without heartbeats. Chrome 89 and the target
+  // WebView ship Web Locks; when the API is absent the guard is disabled
+  // instead of misreporting a capability gap as a conflicting instance.
+  var ENGINE_LOCK_NAME = "krkr2web-engine-instance";
+  var engineLockRelease = null;
+
+  function acquireEngineSingleton() {
+    if (!(navigator.locks && typeof navigator.locks.request === "function")) {
+      return Promise.resolve(true);
+    }
+    return new Promise(function (resolve) {
+      navigator.locks.request(ENGINE_LOCK_NAME, { mode: "exclusive", ifAvailable: true },
+        function (lock) {
+          if (!lock) { return undefined; }
+          resolve(true);
+          // Keep this returned promise pending to hold the lock;
+          // releaseEngineSingleton() settles it.
+          return new Promise(function (holdResolve) {
+            engineLockRelease = function () {
+              engineLockRelease = null;
+              holdResolve();
+            };
+          });
+        })
+        .then(function (held) { if (held === undefined) { resolve(false); } })
+        .catch(function () { resolve(false); });
+    });
+  }
+
+  function releaseEngineSingleton() {
+    if (!engineLockRelease) { return; }
+    var release = engineLockRelease;
+    engineLockRelease = null;
+    try { release(); } catch (error) {}
+  }
+
   function terminateInstance(instance, reason, forced) {
     try {
       // preserve the frozen-session tail across restarts so a post-freeze
@@ -577,6 +618,7 @@
     } catch (error) {}
     saveSyncFrozen = true;
     engineSessionActive = false;
+    releaseEngineSingleton();
     moduleGeneration += 1;
     engineHeartbeatAt = 0;
     engineStallSince = null;
@@ -679,6 +721,14 @@
     fatalAt = null;
     saveSyncFrozen = false;
     firstDynamicError = null;
+    var singletonHeld = await acquireEngineSingleton();
+    if (!singletonHeld) {
+      engineSessionActive = false;
+      setStatus("引擎已在其他标签页运行", "同一站点同时只能运行一个引擎实例；请关闭其他标签页后重试", "fail");
+      persistEvidence();
+      notifyState();
+      throw new Error("Engine singleton conflict: another tab holds the engine lock");
+    }
     try {
       launchEvidence = {
         requestedAt: new Date().toISOString(),
@@ -852,6 +902,7 @@
           if (generation !== moduleGeneration) { return; }
           crashed = true;
           ready = false;
+          releaseEngineSingleton();
           recordEngineLine("Wasm abort: " + String(reason), true);
           errors.push("Wasm abort: " + String(reason));
           setStatus("引擎已停止", String(reason), "fail");
@@ -861,6 +912,7 @@
         onExit: function (status) {
           if (generation !== moduleGeneration) { return; }
           ready = false;
+          releaseEngineSingleton();
           if (status !== 0) {
             crashed = true;
             setStatus("引擎已停止", "退出状态：" + status, "fail");
@@ -900,6 +952,7 @@
       pendingAudioContext = null;
       if (generation !== moduleGeneration) { return snapshot(); }
       engineSessionActive = false;
+      releaseEngineSingleton();
       crashed = true;
       if (engineVariant && engineVariant.worker && moduleInstance) {
         try { moduleInstance.forceTerminate("startup-failed"); } catch (ignored) {}

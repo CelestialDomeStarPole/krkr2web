@@ -35,7 +35,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 | P0-2 | `TVPGetRoughTickCount32` 软件锁相环 | P0 | **已完成**（2026-08-23，构建+引擎闭环冒烟通过） |
 | P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | **已完成**（2026-08-23，直读路径+回归冒烟通过） |
 | P1-1 | WebGL shader 精度修复 | P1 | **已完成**（2026-08-23，重写生效下闭环冒烟通过） |
-| P1-2 | 跨标签页引擎单例（Web Locks） | P1 | 未开始 |
+| P1-2 | 跨标签页引擎单例（Web Locks） | P1 | **已完成**（2026-08-23，双标签真会话验证通过） |
 | P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | 未开始 |
 | P1-4 | `TVPExitApplication` 退出对齐 | P1 | 未开始 |
 | P2-1 | UI 资源是否仍整体 preload（调研） | P2 | 未开始 |
@@ -149,8 +149,23 @@ shared-memory 预分配降档。
 
 - 目标：`navigator.locks` 防止多实例同时运行。
 - 参考：`kirikiroid2-web/platforms/web/shell.html`
-- 涉及：`apps/web/player.js`
-- 状态：未开始
+- 涉及：`apps/web/player.js`、`apps/web/play/app.js`（同锁名
+  `krkr2web-engine-instance`，两类页面互斥）
+- 状态：**已完成**（2026-08-23，双标签真会话验证通过）
+- 实现要点：
+  - `ifAvailable: true` + 独占模式：拿不到锁即报冲突（不排队）；回调返回
+    永不 settle 的 Promise 持锁，成功信号经独立 resolver 同步发出
+    （`navigator.locks.request` 本身会一直 pending，不能 await 它判成功）。
+  - 生命周期绑定会话而非页面：player.js 在 `startFresh` 前获取，
+    `terminateInstance`（stop/forceStop 汇合点）、启动失败 catch、引擎
+    `onExit`/`onAbort` 自退时释放；restart 经 stop→startFresh 自然
+    释放重取。play 页无原地停止（重启即跳转），持锁到文档销毁。
+  - 标签页关闭/崩溃由浏览器自动释放（锁绑定 Document），无需心跳。
+  - 缺 API（Chrome 89 与目标 WebView 均已内置）时禁用守卫而非误报冲突。
+- 本轮自检（未跑全量）：`node --check` ×2；`prepare_d4_product.ps1
+  -SkipEngineBuild` 打包 + 8766 端口带 resource-map 的诊断服务器，真会话
+  双标签脚本：tab1 库页安装并启动引擎后，tab2 play 页报“引擎已在其他
+  标签页运行”；关闭 tab1 后 tab2 重载正常启动（exit 0）。
 
 ### 阶段 P1-3：早期日志捕获
 
@@ -298,3 +313,18 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
 - 自检：正则单测 7/7（裸 uniform 提升；显式 highp/mediump/lowp、sampler、
   attribute 均不动）；探针页部署后 `d3_browser_smoke` exit 0。
 - **下一步**：P1-2 跨标签页引擎单例（Web Locks，`apps/web/player.js`）。
+
+### 2026-08-23 P1-2 完成（Web Locks 引擎单例）
+
+- `apps/web/player.js` + `apps/web/play/app.js`，锁名
+  `krkr2web-engine-instance`；player 按会话持有/释放（terminateInstance、
+  启动失败 catch、onExit/onAbort），play 页持到文档销毁。
+- 关键坑：持锁回调返回 pending Promise 时 `navigator.locks.request` 不
+  resolve，成功信号必须走独立 resolver；`ifAvailable` 拿不到锁时回调
+  返回 undefined、request resolve undefined（借此时序区分冲突）。
+- 验证：d4 产品页（`prepare_d4_product.ps1 -SkipEngineBuild`）+ 8766 带
+  resource-map 的诊断服务器，真会话双标签：运行中开新 play 页报冲突、
+  关闭引擎标签后重载可启动（exit 0）。注意 d4 安装流程必须服务器带
+  `--resource-map`，否则 chunk 校验过不去。
+- **下一步**：P1-3 早期日志捕获（`?debugEarlyLogs=1`，`apps/web/index.html`
+  + 诊断报告，参考 shell.html）。

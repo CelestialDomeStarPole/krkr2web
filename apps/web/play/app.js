@@ -156,6 +156,34 @@
       setStatus("无法启动游戏", "游戏标识无效。", "fail");
       return;
     }
+    // krkr2web: cross-tab engine singleton via Web Locks (same lock name as
+    // apps/web/player.js, so either page guards against the other). The play
+    // page never stops the engine in place (restart navigates), so the lock
+    // is simply held until the document is destroyed. Chrome 89 and the
+    // target WebView ship Web Locks; a missing API disables the guard rather
+    // than misreporting a capability gap as a conflicting instance.
+    var engineLockRelease = null;
+    var singletonHeld = await new Promise(function (resolve) {
+      if (!(navigator.locks && typeof navigator.locks.request === "function")) {
+        resolve(true);
+        return;
+      }
+      navigator.locks.request("krkr2web-engine-instance", { mode: "exclusive", ifAvailable: true },
+        function (lock) {
+          if (!lock) { return undefined; }
+          resolve(true);
+          return new Promise(function (holdResolve) {
+            engineLockRelease = function () { holdResolve(); };
+          });
+        })
+        .then(function (held) { if (held === undefined) { resolve(false); } })
+        .catch(function () { resolve(false); });
+    });
+    if (!singletonHeld) {
+      setStatus("引擎已在其他标签页运行", "同一站点同时只能运行一个引擎实例；请关闭其他标签页后重试", "fail");
+      persistEvidence();
+      return;
+    }
     try {
       prepared = await storageBridge.prepare(gameId);
       elements.title.textContent = prepared.manifest.title;
@@ -205,6 +233,7 @@
         }, 1500);
       }
     } catch (error) {
+      if (engineLockRelease) { try { engineLockRelease(); } catch (ignored) {} }
       errors.push(errorText(error));
       setStatus("无法启动游戏", errorText(error), "fail");
       persistEvidence();
