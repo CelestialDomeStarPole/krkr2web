@@ -62,10 +62,52 @@ $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFr
 foreach ($game in $catalog.games) {
     if ($game.gameId -eq "senren-banka") {
         $game | Add-Member -NotePropertyName coverUrl -NotePropertyValue "/assets/default-cover.png" -Force
-        $game | Add-Member -NotePropertyName description -NotePropertyValue "Yuzusoft《千恋万花》：和风奇幻恋爱冒险游戏，全程语音。完整下载约 3.77 GiB 后即可在本机离线游玩，支持存读档、场景回想与 CG 鉴赏。" -Force
+        $description = "Yuzusoft《千恋万花》：和风奇幻恋爱冒险游戏，全程语音。完整下载约 3.77 GiB 后即可在本机离线游玩，支持存读档、场景回想与 CG 鉴赏。"
+        $game | Add-Member -NotePropertyName description -NotePropertyValue $description -Force
+        # auto-catalog parity: the same metadata ships as meta.json inside the
+        # version directory so servers with --auto-catalog render identically
+        $metaDirectory = Join-Path $staging (Join-Path "games" (Join-Path "senren-banka" $game.version))
+        [ordered]@{
+            schemaVersion = 1
+            description = $description
+            coverUrl = "/assets/default-cover.png"
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $metaDirectory "meta.json") -Encoding UTF8
     }
 }
 $catalog | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $catalogPath -Encoding UTF8
+
+# krkr2web: the small self-test game joins the library as a quick-install
+# title alongside the multi-GB game. The library sees it through --auto-catalog
+# (its manifest lands under games/); d5 keeps its no-xp3-in-tree contract, so
+# its package is served through the resource map like the senren-banka
+# archives instead of being physically copied.
+$d3EngineGames = Join-Path $engineOutput "games\d3-test"
+$d3Package = Join-Path $projectRoot "build\d3-test-package\data.xp3"
+if ((Test-Path -LiteralPath $d3EngineGames) -and (Test-Path -LiteralPath $d3Package)) {
+    Copy-Item -LiteralPath $d3EngineGames -Destination (Join-Path $staging "games") -Recurse -Force
+    $d3ManifestPath = Get-ChildItem -LiteralPath $d3EngineGames -Filter manifest.json -Recurse | Select-Object -First 1
+    $d3Manifest = Get-Content -LiteralPath $d3ManifestPath.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+    $d3VersionDirectory = $d3ManifestPath.DirectoryName
+    [ordered]@{
+        schemaVersion = 1
+        description = "用于验证通用产品流程的 KRKR2 小型游戏。"
+        coverUrl = "/assets/default-cover.png"
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $d3VersionDirectory "meta.json") -Encoding UTF8
+    $d3PackageEntry = $d3Manifest.packages | Where-Object { $_.id -eq "data.xp3" } | Select-Object -First 1
+    $resourceMapPath = Join-Path $staging "resource-map.json"
+    $resourceMap = Get-Content -LiteralPath $resourceMapPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $d3Resource = [ordered]@{
+        url = $d3PackageEntry.url
+        source = (Resolve-Path -LiteralPath $d3Package).Path
+        size = $d3PackageEntry.size
+        sha256 = $d3PackageEntry.sha256
+    }
+    $keptResources = @($resourceMap.resources | Where-Object { "$($_.url)" -notlike "/games/d3-test/*" })
+    $resourceMap.resources = @($keptResources + $d3Resource)
+    $resourceMap | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $resourceMapPath -Encoding UTF8
+} else {
+    Write-Host "D3 self-test sources missing; library lists senren-banka only" -ForegroundColor DarkGray
+}
 
 # krkr2web: stamp local asset references with content hashes so a revalidated
 # index.html can only pull matching scripts (Android WebView has served stale

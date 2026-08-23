@@ -550,3 +550,46 @@ P0-4（System.exit 优雅改道）与 P1-1（shader 精度）不依赖网络形�
 
 已知边界：Git Bash 下 `--cover-url /assets/...` 会被 MSYS 转成 Windows 路径，
 命令前加 `MSYS_NO_PATHCONV=1` 或改用双斜杠；文档已注明。
+
+## 2026-08-23 《千恋万花》上架 443 游戏库（游戏文件不入库）
+
+需求：把《千恋万花》加入正式部署的游戏库，且 git 不得跟踪任何游戏文件。
+
+部署形态：443 端点切换为 d5 产品（build/d5-product，含 compat 层与资源版本
+戳），`--auto-catalog --resource-map --video-directory --savedata-directory` 全量
+挂载。游戏库现在同时列出 D3 self-test（8.9 MB 快装小游戏）与千恋万花
+（4.04 GiB）。
+
+游戏文件的隔离（全部被 .gitignore 覆盖，git status 零游戏文件）：
+
+- 三个 XP3 实体只存在于 `参考资料/千恋万花/`（2.31 GB data + 307 MB adult +
+  1.42 GB video），经 resource-map 映射服务，从不拷入仓库工作树；
+- 清单/meta 与 resource-map 均在 build/ 下；转码视频在 build/video-transcode/
+  （1.4 GB）；d5 校验器本来禁止产品树内出现实体 .xp3（check_d5_artifacts），
+  d3-test 的包也按同一契约走 resource-map 条目。
+
+改动：
+
+1. `tools/prepare_d5_product.ps1`：senren-banka 版本目录写 meta.json
+   （auto-catalog 渲染与静态 catalog 一致）；附带把 d3-test 清单目录并入
+   games/（auto-catalog 自动发现）+ 其 data.xp3 以 resource-map 条目接入
+   （替换式合并，不破坏 senren-banka 条目）。
+2. `tools/start_d5_product.ps1`：默认追加 `--auto-catalog`（-NoAutoCatalog 关闭）。
+3. `tools/https_diagnostics_server.py` / `check_d4_artifacts.py` /
+   `check_d5_artifacts.py`：resource-map.json 读取改 utf-8-sig（PowerShell
+   工具链写出的 BOM 不再炸服务器启动与产物校验）。
+
+验证：
+
+- prepare_d5 重建通过（d4/d5 两级校验；"existing 4.04 GB cache identity
+  preserved"）；产品树内无 .xp3。
+- 443 实测：auto-catalog 列出双游戏（含 meta 描述/封面）；senren-banka
+  manifest 200（75 KB）；2.3 GB data.xp3 Range 206；d3-test 包 206；
+  /videos/senren-banka/*.webm 200。
+- 浏览器实测：游戏库渲染 2 张卡片，选中千恋万花显示详情与完整下载按钮
+  （截图 build/d5-library-senren.png）。
+- d3-test meta.json 热更新：写入后无需重启服务器，auto-catalog 立即反映
+  （mtime 缓存失效路径实测）。
+
+注：本轮不重新哈希 4 GB 包体（manifest 沿用 content-ebe5177821a6917c7a80，
+缓存标识保留，已安装设备无需重新下载）。

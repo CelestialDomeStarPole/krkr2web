@@ -30,7 +30,7 @@ def main() -> None:
         raise SystemExit("D4 artifacts missing: " + ", ".join(missing))
 
     catalog = json.loads((root / "catalog.json").read_text(encoding="utf-8-sig"))
-    resources = json.loads((root / "resource-map.json").read_text(encoding="utf-8"))["resources"]
+    resources = json.loads((root / "resource-map.json").read_text(encoding="utf-8-sig"))["resources"]
     if catalog.get("schemaVersion") != 1 or not catalog.get("games"):
         raise SystemExit("D4 catalog is empty or invalid")
     for game in catalog["games"]:

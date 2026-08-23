@@ -610,7 +610,7 @@ def main() -> None:
     if args.resource_map is not None:
         resource_map_path = args.resource_map.resolve()
         try:
-            raw_resource_map = json.loads(resource_map_path.read_text(encoding="utf-8"))
+            raw_resource_map = json.loads(resource_map_path.read_text(encoding="utf-8-sig"))
             raw_resources = raw_resource_map["resources"]
             if not isinstance(raw_resources, list):
                 raise TypeError("resources must be an array")

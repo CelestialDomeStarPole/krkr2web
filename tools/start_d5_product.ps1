@@ -3,7 +3,8 @@
     [int]$Port = 443,
     [string]$HostName = "game.example.com",
     [switch]$SkipBuild,
-    [switch]$Http
+    [switch]$Http,
+    [switch]$NoAutoCatalog
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,12 @@ $arguments = @(
     "--video-directory", $videoDirectory,
     "--savedata-directory", (Join-Path $projectRoot "参考资料\savedata")
 )
+if (-not $NoAutoCatalog) {
+    # the library is synthesized from games/<id>/<version>/manifest.json, so
+    # dropping another game folder in (plus its resource-map entry) is enough
+    # to list it; the static catalog stays as the fallback
+    $arguments += "--auto-catalog"
+}
 if ($Http) {
     $arguments += "--http"
     Write-Host "D5 product: http://${BindAddress}:$Port/" -ForegroundColor Green

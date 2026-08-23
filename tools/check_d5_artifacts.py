@@ -46,7 +46,7 @@ def main() -> None:
     if manifest.get("requiredBytes") != sum(EXPECTED_PACKAGES.values()):
         raise SystemExit("D5 requiredBytes changed")
 
-    profile = json.loads(args.profile.read_text(encoding="utf-8"))
+    profile = json.loads(args.profile.read_text(encoding="utf-8-sig"))
     if profile.get("id") != PROFILE_ID:
         raise SystemExit("D5 profile id is invalid")
     if profile.get("entryPackage") != "data.xp3":
@@ -62,7 +62,7 @@ def main() -> None:
     if profile.get("videoStrategy") != "mp4-bridge":
         raise SystemExit("D5 profile lost the mandatory D6 video strategy")
 
-    resource_map = json.loads((root / "resource-map.json").read_text(encoding="utf-8"))
+    resource_map = json.loads((root / "resource-map.json").read_text(encoding="utf-8-sig"))
     mapped = {item["url"]: item for item in resource_map.get("resources", [])}
     for package, size in EXPECTED_PACKAGES.items():
         url = f"/games/{GAME_ID}/{CONTENT_VERSION}/{package}"
