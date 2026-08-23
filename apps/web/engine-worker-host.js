@@ -389,7 +389,15 @@
     this.replacementCanvas = null;
     this.ensureAudioContext(config.audioContext || this.options.audioContext);
     try {
-      this.worker = new Worker(config.workerUrl || this.options.workerUrl || "/engine-worker.js");
+      var workerUrl = config.workerUrl || this.options.workerUrl || "/engine-worker.js";
+      // krkr2web: offline launches create the worker from a Blob built out
+      // of text the page preloaded while online; new Worker() network
+      // loads are aborted under Chrome offline emulation even with a
+      // warm HTTP cache.
+      if (config.workerScript) {
+        workerUrl = URL.createObjectURL(new Blob([config.workerScript], { type: "text/javascript" }));
+      }
+      this.worker = new Worker(workerUrl);
       this.offscreenCanvas = this.canvas.transferControlToOffscreen();
       this.worker.addEventListener("message", this.boundMessage);
       this.worker.addEventListener("error", this.boundError);
@@ -432,6 +440,7 @@
       audioSampleRate: this.audioContext ? this.audioContext.sampleRate : 48000,
       devicePixelRatio: Number(config.devicePixelRatio || this.options.devicePixelRatio || 1)
     };
+    if (config.scriptTexts) { message.scriptTexts = config.scriptTexts; }
     var transfer = [this.offscreenCanvas];
     if (config.wasmBinary) {
       var source = config.wasmBinary instanceof Uint8Array ? config.wasmBinary : new Uint8Array(config.wasmBinary);

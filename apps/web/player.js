@@ -38,6 +38,7 @@
   var restartPromise = null;
   var stopSerial = 0;
   var wasmBinary = null;
+  var workerScriptTexts = null;
   var engineManifest = null;
   var engineVariant = null;
   var runtimeFallbackReason = null;
@@ -264,6 +265,24 @@
     assetState = { status: "loading", bytes: 0, error: null, variant: null };
     notifyState();
     preloadPromise = (async function () {
+      // krkr2web: capture the texts of every script the dedicated worker
+      // loads (its own bootstrap plus storage/prefetch/engine) so an
+      // offline launch can import them from Blob URLs: Chrome's offline
+      // emulation aborts worker script loads (new Worker and importScripts
+      // alike) even when HTTP cache entries exist.
+      if (workerScriptTexts === null) {
+        workerScriptTexts = Promise.all([
+          "/engine-worker.js", "/play/storage.js", "/play/prefetch.js", "/engine/krkrsdl2.js"
+        ].map(function (url) {
+          return fetch(url, { credentials: "same-origin" })
+            .then(function (response) { return response.ok ? response.text() : null; })
+            .catch(function () { return null; });
+        })).then(function (texts) {
+          return {
+            worker: texts[0], storage: texts[1], prefetch: texts[2], engine: texts[3]
+          };
+        });
+      }
       var capability = workerCapability();
       var candidates = [ENGINE_VARIANTS.baseline];
       runtimeFallbackReason = capability.supported ? null : capability.reason;
@@ -304,7 +323,8 @@
             throw new Error("missing module factory");
           }
           wasmBinary = new Uint8Array(buffer);
-          engineVariant = capability.supported ? Object.assign({}, candidate, {
+          var forcedBaseline = new URLSearchParams(location.search).get("engineVariant") === "baseline";
+          engineVariant = capability.supported && !forcedBaseline ? Object.assign({}, candidate, {
             id: "dedicated-worker-baseline",
             worker: true
           }) : candidate;
@@ -774,6 +794,7 @@
       launchEvidence.firstDynamicError = null;
       setStatus("正在载入游戏", "从本机读取 " + activeTitle, "loading");
       if (engineVariant && engineVariant.worker) {
+        var scripts = await workerScriptTexts;
         var host = new window.Krkr2EngineWorkerHost({
           canvas: elements.canvas,
           audioContext: audioContext,
@@ -841,6 +862,12 @@
           gameId: gameId,
           arguments: engineArguments(activeProfile, gameId),
           workerUrl: "/engine-worker.js",
+          workerScript: scripts.worker,
+          scriptTexts: {
+            storage: scripts.storage,
+            prefetch: scripts.prefetch,
+            engine: scripts.engine
+          },
           engineScriptUrl: "/engine/krkrsdl2.js",
           wasmUrl: engineVariant.wasmUrl,
           storageScriptUrl: "/play/storage.js",

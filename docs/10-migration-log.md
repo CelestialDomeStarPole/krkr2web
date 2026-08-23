@@ -31,7 +31,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 
 | 编号 | 优化项 | 优先级 | 状态 |
 |---|---|---|---|
-| P0-1 | 主循环 RAF 帧率限制 | P0 | **已完成**（2026-08-23 桌面验证通过） |
+| P0-1 | 主循环 RAF 帧率限制 | P0 | **已完成**（2026-08-23 桌面验证通过；统一审计通过） |
 | P0-2 | `TVPGetRoughTickCount32` 软件锁相环 | P0 | **已完成**（2026-08-23，构建+引擎闭环冒烟通过） |
 | P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | **已完成**（2026-08-23，直读路径+回归冒烟通过） |
 | P1-1 | WebGL shader 精度修复 | P1 | **已完成**（2026-08-23，重写生效下闭环冒烟通过） |
@@ -412,3 +412,47 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
 - 迁移清单 P0-1～P2-2 全部阶段完毕。**下一步：统一审计**——全套桌面
   验证（d3 冒烟×4 含 frame_limit、unittest、产物检查、d4 产品冒烟），
   并补 P1-4 的 System.exit 直达路径定向验证（临时 probe 标签）。
+
+### 2026-08-23 统一审计完成（全部优化项 P0-1～P2-2 收口）
+
+**审计范围与结果（全部通过）**：
+1. P1-4 定向验证：startup.tjs 临时在 [end] 处理器加 `System.exit(0)` →
+   reroute 日志出现 2 次（重载前后会话各 1 次），引擎优雅退出无 abort，
+   冒烟 exit 0；已还原（内容版本回到 content-28bcd…）。
+2. d3 全套：`d3_browser_smoke` / `d3_stability_smoke`(soak 5s) /
+   `d3_enhanced_input_smoke` / `d3_frame_limit_smoke` 全部 exit 0；
+   `python -m unittest tests.test_d3_tools` 14/14；
+   `check_d3_artifacts.py`（Asyncify 启用，无 pthreads/SAB/SIMD/JSPI/Wasm EH）通过。
+3. d4 产品（重打包含 0084 引擎）：`d4_browser_smoke` exit 0（安装、断网
+   零请求启动、存档、返回游戏库、重启、崩溃恢复、强制终止、删除）。
+4. worker 变体离线零请求启动专项验证：ready、无网络请求失败。
+
+**审计中发现的既有缺陷（与本次迁移无关，已定位并修复）**：
+- 现象：d4 冒烟在当前 Chrome 下离线启动必挂（"Worker fatal"）。
+- 定位（三步隔离）：旧 web 文件 + 新引擎同样挂（排除迁移改动）；锁定
+  worker host 后离线启动成功（锁定 worker 变体）；网络轨迹显示
+  `new Worker()` 与 worker 内 `importScripts` 在 Chrome 离线仿真下即使
+  HTTP 缓存有条目也直接 ERR_ABORTED/NetworkError。d4 冒烟写于 worker
+  变体存在之前，历史通过时走的是主线程回退路径。
+- 修复（产品级，`apps/web`）：
+  - `player.js`：preload 在线阶段预取 worker 自身 + storage/prefetch/
+    engine 四个脚本文本；`?engineVariant=baseline` 诊断开关（强制主线程
+    变体）。
+  - `engine-worker-host.js`：`workerScript` 文本 → Blob URL 建 worker；
+    `scriptTexts` 随 start 消息下发（wasm 本就经 transfer 直传）。
+  - `engine-worker.js`：脚本 URL 先按页面 origin 解析为绝对地址（blob
+    基准无法解析根相对路径）；`importWorkerScript` 有文本走 Blob
+    importScripts、无文本回退 URL（在线路径不变）。
+- 验证：worker 变体离线启动 ready 且零请求失败；d4 冒烟（基线变体）
+  全流程 exit 0。
+- 测试更新：`d4_browser_smoke.js` 离线断言排除 blob: 加载（内存加载非
+  网络）；全流程 URL 追加 `engineVariant=baseline`（存档/崩溃阶段依赖
+  主线程 `window.Module`，属冒烟既有假设）。
+
+**遗留（后续工作，非本次范围）**：d4 冒烟对 worker 变体的全流程覆盖
+（存档/崩溃恢复需经 worker 桥消息而非 window.Module）；worker 侧存储
+指标快照仅在 storage-ready 时上报一次（player 快照中的 worker 存储
+readCalls 恒 0，建议随心跳刷新）。
+
+**迁移项目收口**：P0-1～P2-2 全部完成，补丁 0082/0083/0084 已登记
+（upstream.json 共 80 个），统一审计通过。

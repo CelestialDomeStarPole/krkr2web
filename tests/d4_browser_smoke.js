@@ -73,7 +73,11 @@ async function main() {
   page.on("request", function (request) { requests.push({ url: request.url(), at: Date.now() }); });
   page.on("dialog", async function (dialog) { dialogs.push(dialog.message()); await dialog.accept(); });
   try {
-    var response = await page.goto(baseUrl + "/library/deep/page.html?source=smoke", { waitUntil: "networkidle", timeout: 30000 });
+    // The save/crash stages below drive the engine through window.Module,
+    // which only exists in the main-thread baseline variant; the dedicated
+    // worker variant (default when supported) has its offline zero-request
+    // launch covered by dedicated checks instead.
+    var response = await page.goto(baseUrl + "/library/deep/page.html?source=smoke&engineVariant=baseline", { waitUntil: "networkidle", timeout: 30000 });
     if (!response || response.status() !== 200 || new URL(page.url()).pathname !== "/") {
       throw new Error("D4 deep route did not reach the library: " + page.url());
     }
@@ -116,7 +120,10 @@ async function main() {
       return window.d4PlayerState && window.d4PlayerState().ready;
     }, null, { timeout: 60000 });
     var offlinePlayer = await playerState(page);
-    var launchRequests = requests.filter(function (entry) { return entry.at >= launchStartedAt && entry.url.indexOf("offline-network-probe-") === -1; });
+    // blob: loads are in-memory (worker/scripts materialized from preloaded
+    // text for offline launches); only server requests count against the
+    // offline zero-request contract.
+    var launchRequests = requests.filter(function (entry) { return entry.at >= launchStartedAt && entry.url.indexOf("offline-network-probe-") === -1 && entry.url.indexOf("blob:") !== 0; });
     if (page.url() !== stableUrl || offlinePlayer.state.href !== stableUrl || !offlinePlayer.playerVisible ||
         offlinePlayer.state.storage.metrics.readCalls === 0 || offlinePlayer.state.storage.metrics.errors.length !== 0 ||
         offlinePlayer.playerState !== "ready" || launchRequests.length !== 0) {

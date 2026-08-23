@@ -601,9 +601,28 @@
     phase = "loading-storage";
     send("phase", { phase: phase });
 
-    var storageScriptUrl = message.storageScriptUrl || "/storage.js";
+    // krkr2web: resolve script URLs against the page origin before
+    // importScripts -- when the worker itself is created from a Blob URL
+    // (offline launch) root-relative paths cannot resolve against the
+    // opaque blob base. Offline launches then import each script from a
+    // Blob built out of text the page preloaded while online: Chrome's
+    // offline emulation aborts worker script loads (new Worker and
+    // importScripts alike) even when HTTP cache entries exist.
+    function resolveScriptUrl(raw, fallback) {
+      var value = raw || fallback;
+      try { return new URL(value, self.location.origin + "/").href; } catch (error) { return value; }
+    }
+    var scriptTexts = message.scriptTexts || {};
+    function importWorkerScript(text, url) {
+      if (text) {
+        importScripts(URL.createObjectURL(new Blob([text], { type: "text/javascript" })));
+        return;
+      }
+      importScripts(url);
+    }
+    var storageScriptUrl = resolveScriptUrl(message.storageScriptUrl, "/storage.js");
     documentTarget.currentScript = { src: storageScriptUrl };
-    importScripts(storageScriptUrl);
+    importWorkerScript(scriptTexts.storage, storageScriptUrl);
     var storage = self.krkr2StorageBridge;
     if (!storage || typeof storage.prepare !== "function") {
       throw new Error("Worker storage bridge did not initialize");
@@ -617,9 +636,9 @@
     // InflatePool) resolve inside this worker. Failure is non-fatal: the
     // engine falls back to its per-segment worker and wasm libwebp.
     try {
-      var prefetchScriptUrl = message.prefetchScriptUrl || "/play/prefetch.js";
+      var prefetchScriptUrl = resolveScriptUrl(message.prefetchScriptUrl, "/play/prefetch.js");
       documentTarget.currentScript = { src: prefetchScriptUrl };
-      importScripts(prefetchScriptUrl);
+      importWorkerScript(scriptTexts.prefetch, prefetchScriptUrl);
       if (self.krkr2webPrefetch && typeof self.krkr2webPrefetch.bindStorage === "function") {
         // rebind the pipeline's storage handle to the worker bridge in case
         // it captured nothing at load time
@@ -632,9 +651,9 @@
 
     phase = "loading-engine";
     send("phase", { phase: phase });
-    var engineScriptUrl = message.engineScriptUrl || "/engine/krkrsdl2.js";
+    var engineScriptUrl = resolveScriptUrl(message.engineScriptUrl, "/engine/krkrsdl2.js");
     documentTarget.currentScript = { src: engineScriptUrl };
-    importScripts(engineScriptUrl);
+    importWorkerScript(scriptTexts.engine, engineScriptUrl);
     var factoryName = message.factoryName || "instantiate_krkrsdl2_module";
     var factory = self[factoryName];
     if (typeof factory !== "function") { throw new Error("Missing engine factory: " + factoryName); }
