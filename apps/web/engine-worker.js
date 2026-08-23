@@ -2,6 +2,28 @@
 (function () {
   "use strict";
 
+  // krkr2web: WebGL shader precision fix for this worker realm (the page's
+  // prototype patch cannot reach OffscreenCanvas contexts created here).
+  // Precision-less uniform declarations are promoted to highp so fragment
+  // shaders do not fall back to mediump on mobile GPUs (same fix as
+  // kirikiroid2-web's shell.html).
+  (function () {
+    var typePattern = /uniform\s+(?!highp\s|mediump\s|lowp\s)(mat[234]|vec[234]|float|int)\s/g;
+    function fixPrecision(source) {
+      return source.replace(typePattern, "uniform highp $1 ");
+    }
+    function patchPrototype(proto) {
+      if (!proto || proto.__krkr2webPrecisionFixed) { return; }
+      var original = proto.shaderSource;
+      proto.shaderSource = function (shader, source) {
+        return original.call(this, shader, fixPrecision(source));
+      };
+      proto.__krkr2webPrecisionFixed = true;
+    }
+    patchPrototype(typeof WebGLRenderingContext !== "undefined" && WebGLRenderingContext.prototype);
+    patchPrototype(typeof WebGL2RenderingContext !== "undefined" && WebGL2RenderingContext.prototype);
+  })();
+
   var CHANNEL = "krkr2web-engine-worker";
   var PROTOCOL_VERSION = 1;
   var sessionId = 0;

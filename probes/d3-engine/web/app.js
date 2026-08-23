@@ -18,6 +18,28 @@
     return nativeConsoleLog.apply(null, arguments);
   };
 
+  // krkr2web: WebGL shader precision fix (mirrors apps/web). The engine's
+  // GL translation layer emits uniform declarations without precision
+  // qualifiers; fragment shaders default to mediump on mobile GPUs.
+  // Promote precision-less uniform declarations to highp so the probe
+  // exercises the same shader path as the product shell.
+  (function () {
+    var typePattern = /uniform\s+(?!highp\s|mediump\s|lowp\s)(mat[234]|vec[234]|float|int)\s/g;
+    function fixPrecision(source) {
+      return source.replace(typePattern, "uniform highp $1 ");
+    }
+    function patchPrototype(proto) {
+      if (!proto || proto.__krkr2webPrecisionFixed) { return; }
+      var original = proto.shaderSource;
+      proto.shaderSource = function (shader, source) {
+        return original.call(this, shader, fixPrecision(source));
+      };
+      proto.__krkr2webPrecisionFixed = true;
+    }
+    patchPrototype(typeof WebGLRenderingContext !== "undefined" && WebGLRenderingContext.prototype);
+    patchPrototype(typeof WebGL2RenderingContext !== "undefined" && WebGL2RenderingContext.prototype);
+  })();
+
   var REPORT_ENDPOINT = "/api/diagnostics-reports";
   var params = new URLSearchParams(location.search);
   var gameId = params.get("gameId") || "d3-test";

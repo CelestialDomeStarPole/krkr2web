@@ -34,7 +34,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 | P0-1 | 主循环 RAF 帧率限制 | P0 | **已完成**（2026-08-23 桌面验证通过） |
 | P0-2 | `TVPGetRoughTickCount32` 软件锁相环 | P0 | **已完成**（2026-08-23，构建+引擎闭环冒烟通过） |
 | P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | **已完成**（2026-08-23，直读路径+回归冒烟通过） |
-| P1-1 | WebGL shader 精度修复 | P1 | 未开始 |
+| P1-1 | WebGL shader 精度修复 | P1 | **已完成**（2026-08-23，重写生效下闭环冒烟通过） |
 | P1-2 | 跨标签页引擎单例（Web Locks） | P1 | 未开始 |
 | P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | 未开始 |
 | P1-4 | `TVPExitApplication` 退出对齐 | P1 | 未开始 |
@@ -129,8 +129,21 @@ shared-memory 预分配降档。
 
 - 目标：`shaderSource` 自动为无精度 `uniform` 补 `highp`。
 - 参考：`kirikiroid2-web/platforms/web/shell.html`
-- 涉及：`apps/web/player.js` / `apps/web/play/app.js`
-- 状态：未开始
+- 涉及：`apps/web/player.js`、`apps/web/play/app.js`、
+  `apps/web/engine-worker.js`（worker realm）、`probes/d3-engine/web/app.js`
+  （探针对齐产品路径）
+- 状态：**已完成**（2026-08-23，重写生效下闭环冒烟通过）
+- 实现要点：
+  - 与参考相同的正则 `/uniform\s+(?!highp\s|mediump\s|lowp\s)(mat[234]|vec[234]|float|int)\s/g`
+    → `uniform highp $1`；sampler 不动（部分 GPU 的 fragment 不接受
+    highp sampler）、attribute 不动（vertex 默认即 highp）。
+  - 包装 `WebGLRenderingContext/WebGL2RenderingContext.prototype.shaderSource`，
+    原型上 `__krkr2webPrecisionFixed` 幂等标记。
+  - worker 变体在 `engine-worker.js` 顶部装同款（页面原型 patch 覆盖不到
+    worker 内 OffscreenCanvas 的 WebGL realm）。
+- 本轮自检（未跑全量）：`node --check` ×4；正则 7 用例单测（裸 uniform
+  提升、显式精度/sampler/attribute 不动）；D3 探针页装同款后
+  `d3_browser_smoke` exit 0（引擎真实 shader 经重写路径编译通过）。
 
 ### 阶段 P1-2：跨标签页引擎单例
 
@@ -275,3 +288,13 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
   `d3_browser_smoke` exit 0。一次性脚本已删（build/p03_direct_check.js）。
 - **下一步**：P1-1 WebGL shader 精度修复（`apps/web/player.js` /
   `apps/web/play/app.js`，参考 `kirikiroid2-web/platforms/web/shell.html`）。
+
+### 2026-08-23 P1-1 完成（WebGL shader 精度）
+
+- 四处安装同一自包含 IIFE：`apps/web/player.js`、`apps/web/play/app.js`
+  （页面 realm）、`apps/web/engine-worker.js`（worker realm，页面原型
+  patch 不到 OffscreenCanvas 上下文）、`probes/d3-engine/web/app.js`
+  （探针对齐产品，冒烟即回归）。
+- 自检：正则单测 7/7（裸 uniform 提升；显式 highp/mediump/lowp、sampler、
+  attribute 均不动）；探针页部署后 `d3_browser_smoke` exit 0。
+- **下一步**：P1-2 跨标签页引擎单例（Web Locks，`apps/web/player.js`）。
