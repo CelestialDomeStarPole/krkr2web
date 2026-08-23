@@ -38,8 +38,8 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 | P1-2 | 跨标签页引擎单例（Web Locks） | P1 | **已完成**（2026-08-23，双标签真会话验证通过） |
 | P1-3 | 早期日志捕获（`?debugEarlyLogs=1`） | P1 | **已完成**（2026-08-23） |
 | P1-4 | `TVPExitApplication` 退出对齐 | P1 | **已完成**（2026-08-23，补丁 0084） |
-| P2-1 | UI 资源是否仍整体 preload（调研） | P2 | 未开始 |
-| P2-2 | 构建脚本 ccache / 参数化（可选） | P2 | 未开始 |
+| P2-1 | UI 资源是否仍整体 preload（调研） | P2 | **已完成**（结论：无对应物，不采纳） |
+| P2-2 | 构建脚本 ccache / 参数化（可选） | P2 | **已决策：不实施**（理由见阶段记录） |
 
 不迁移：JSPI、OPFS 主链路、pthreads/SAB、Service Worker/PWA、Cocos2d-x 专属
 shared-memory 预分配降档。
@@ -54,6 +54,31 @@ shared-memory 预分配降档。
   冒烟测试经 `python tools/https_diagnostics_server.py` 纯 HTTP 模式 +
   `node tests/d3_*_smoke.js` 执行）
 - [x] 确定每个补丁编号（0082+；P0-1→0082、P0-2→0083、P1-4→0084，其余按序）
+
+### 阶段 P2-1：UI 资源 preload 调研
+
+- 状态：**已完成**（2026-08-23，结论：本项目无整体 preload 机制，无优化对象）
+- 调研结论：
+  - 参考项目的优化点是它自己的打包历史：用 `assets.zip`（整包下载为
+    Blob + VLFS 按需切片读取、不驻留解压内存）取代 emscripten
+    `--preload-file index.data`（启动时把全部资源物化进 wasm 堆常驻）。
+  - 本项目从未使用 --preload-file/index.data 等价物：shell UI 资源极简
+    （1 个 55KB 默认封面 PNG 惰性 `<img>`、内联 SVG 图标、单个 CSS）；
+    引擎 preload() 只取 wasm 单文件并做清单校验；游戏数据走 IndexedDB
+    分块按需读取（P0-3 后大读直读不污染 LRU）——已等价于参考项目
+    VLFS 的惰性模型。
+  - 因此无需迁移任何代码；记录结论备查。
+
+### 阶段 P2-2：构建脚本 ccache / 参数化（可选）
+
+- 状态：**已决策：不实施**（2026-08-23）
+- 理由：
+  - 本机（Windows）未安装 ccache/sccache；引入需在 .toolchains 供应商化
+    并处理与 cmake PCH + Asyncify 的组合风险，验证成本高。
+  - 全量重建仅在指纹变化（补丁登记/上游提交变化）时发生，每轮引擎补丁
+    一次约 8 分钟；日常开发走 ninja 增量（秒级）。收益不抵风险。
+  - 若未来补丁频率显著提高，再评估 `CMAKE_<LANG>_COMPILER_LAUNCHER`
+    接 ccache 的方案。
 
 ### 阶段 P0-1：主循环 RAF 帧率限制
 
@@ -376,3 +401,14 @@ TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
   定向验证。
 - **下一步**：P2-1 UI 资源 preload 调研 + P2-2 构建脚本 ccache/参数化
   （可选），随后统一审计。
+
+### 2026-08-23 P2-1/P2-2 完成（调研与决策，无代码）
+
+- P2-1：本项目无整体 preload（从未用 --preload-file；UI 资源极简惰性、
+  游戏数据 IndexedDB 分块按需），参考项目的 assets.zip+VLFS 优化无对应
+  物，不采纳。
+- P2-2（可选项）：决策不实施——无 ccache、PCH+Asyncify 组合风险、全量
+  重建低频（每引擎补丁一次），增量构建已覆盖日常。
+- 迁移清单 P0-1～P2-2 全部阶段完毕。**下一步：统一审计**——全套桌面
+  验证（d3 冒烟×4 含 frame_limit、unittest、产物检查、d4 产品冒烟），
+  并补 P1-4 的 System.exit 直达路径定向验证（临时 probe 标签）。
