@@ -593,3 +593,75 @@ P0-4（System.exit 优雅改道）与 P1-1（shader 精度）不依赖网络形�
 
 注：本轮不重新哈希 4 GB 包体（manifest 沿用 content-ebe5177821a6917c7a80，
 缓存标识保留，已安装设备无需重新下载）。
+
+## 2026-08-23 真机卡顿归因与修复（TB-X802F/TBS 046299 诊断报告驱动）
+
+验收标准变更：**以真机上传的诊断报告为准**，桌面流畅不能外推到 Android
+（TBS WebView 无 OffscreenCanvas，worker 引擎变体与全部 worker 内解码优
+化在真机上不可用，产品实际运行 baseline 主线程变体）。
+
+真机报告 `diagnostic-reports/20260823-084346-0389f883.json` 关键读数：
+baseline 回退（offscreen-canvas）；`predictedOpens 0 / notifyOpens 441`；
+`decodeFailures 281 / nativeDecodes 0`；`KRKR2WEB_D5_STALL 主循环停跳 40s`
+（无挂起操作 trace）；PERF avg_ms 125–146（约 8 FPS）、max_ms 3809；
+heap 208→805MB 单调增长；cacheHits 216 / cacheMisses 232。
+
+### 根因（全部实锤）
+
+- **RC1a 零填充缺陷（patch 0079，从未工作过）**：数字后继只写入 `vlen`
+  个数字到 `buf[]`，其余位读**未初始化栈内存**——`0001→2` 的候选名是
+  `pfbg` + 垃圾 + `2.png`，IsExistent 必假。任何游戏上预测通道都
+  静默失效（PRED_IN 实测 out=pfbg42.png/pfbg13.png/空串）。
+- **RC1b 扩展名盲区（patch 0079）**：数字扫描从名字尾部开始，命中的是
+  扩展名（`.ogg` 的 `g`），带扩展名的存储名（即全部真实文件）永远算
+  不出后继。修复：先剥扩展名、预测完再接回。
+- **RC1c 归档名不匹配（play/prefetch.js）**：引擎通知的归档名是
+  `file://./data.xp3`，页面存储桥只认 `data.xp3`，readRange 静默返回
+  null（prefetchReads=0 佐证），预取从未读过一块。修复：normalizeArchive。
+- **RC1d 图片园键不匹配（play/prefetch.js）**：引擎 FillFromPark 用完整
+  in-archive 名（`file://./data.xp3>dir/x.png`）探针，园内键是裸名。
+  修复：bareName 剥前缀（probe/read/has）。
+- **RC2 解码 worker 熔断缺失（play/prefetch.js）**：TBS worker 作用域无
+  OffscreenCanvas，解码 job 全部抛错；ensureWorker 的 `worker || workerBroken`
+  判断在 worker 对象存在时永不回退，281 次白跑 + 每张 WebP 落回
+  主线程 wasm 解码（40–100ms/张）。修复：markWorkerBroken（终结 worker、
+  熔断后续投递、失败在途 job 立即拒绝），baseline 回退 decodeOnMain
+  （浏览器原生解码 + 页内回读），新增 mainDecodes 指标。
+- **RC3 解码 await 无超时无 trace（engine/webp/LoadWEBP.cpp）**：唯一
+  没有超时/trace 的 Asyncify 挂起点；createImageBitmap 挂死即引擎挂死
+  且看门狗报不出挂起操作（40s 停摆即存档恢复长 tick 的放大表现）。
+  修复：8s Promise.race + krkr2webAsyncTrace。
+- **RC4 配额前置检查补强（probes/d2-downloader/web/downloader.js）**：
+  安装前 best-effort `navigator.storage.persist()`（未持久化源配额只有
+  磁盘的一小部分，桌面新 profile 3GiB < 4.65GiB 被 E_QUOTA 秒拒）。
+
+保留设施：`krkr2webPredictionDebug` 页面开关（patch 0079 每次真实打开
+打印 candidate/exists，真机现场可开）。
+
+### 复现与验证（tests/d5_device_regression_audit.js）
+
+桌面复现真机条件：`?engineVariant=baseline` + Worker 包装器模拟 TBS
+（解码形状的 job `{id,bytes,bgra}` 一律回 "OffscreenCanvas unavailable"，
+膨胀 job 走真 worker，与真机 poolInflates 正常一致）。d3 自测游戏新增
+`pfbg0001..0006.png`（WebP 字节伪装 .png 扩展名，与真实游戏一致）编号
+序列 + startup.tjs image 标签处理器（走真实图形加载器）。
+
+结果（engine build 5f32c76f）：6 阶段全 PASS——
+predictedOpens 9、prefetchedFiles 3、segmentParkPuts 5、imageParkPuts 3、
+**imageParkHits 3（引擎消费园命中）**、decodeFailures 3（熔断）后
+mainDecodes 8（页内回退）、无停摆、perf 持续输出。
+段园命中需要压缩段归档（d3 包未压缩，按设计不经过段园；真机游戏为
+压缩段，段园命中以真机报告为准）。
+
+审计踩坑记录（供复用）：持久 profile 会保留 KAG 进度存档导致直接恢复
+到剧本结尾（审计先经存档管理器删档）；Playwright 无 persistent-storage
+权限名，改用 E: 盘持久 profile 提升临时配额；resource-map 服务器启动时
+一次性加载，产品热换后必须重启 443。
+
+### 遗留观察（真机复测关注）
+
+- heap 805MB（1GiB 顶）与 cacheMisses 高企：预取管线修复后热点块应
+  常驻，观察堆与 miss 变化；
+- OpenAL A004（VIDEO_STOP 后 alGetSourcei）：暂按噪声处理；
+- profile runtime 参数（maximumWasmMemoryBytes 等）仅在已退役的 worker
+  运行时消费，baseline 用构建期默认值——如真机复测仍有内存压力再立项。

@@ -54,6 +54,27 @@ def make_probe_wav(sample_rate: int = 22050, duration_ms: int = 360) -> bytes:
     return b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(pcm)) + b"WAVEfmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(pcm)) + pcm
 
 
+def make_probe_webp(index: int) -> bytes:
+    """Tiny distinct lossless WebP for the numbered prefetch-probe sequence.
+
+    Real opens of pfbg0001.png..pfbg0006.png (WebP bytes under a .png extension, matching the real games) exercise the numeric-successor
+    prediction (engine patch 0079), the segment/image parks (play/prefetch.js)
+    and the off-thread WebP decode chain end to end; WebP magic is sniffed by
+    the loader router regardless of the .webp extension (ADR-008).
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return b""
+    import io
+    palette = [(255, 0, 0), (0, 255, 0), (0, 0, 255),
+               (255, 255, 0), (255, 0, 255), (0, 255, 255)]
+    buffer = io.BytesIO()
+    Image.new("RGBA", (32, 32), palette[(index - 1) % len(palette)] + (255,)).save(
+        buffer, "WEBP", lossless=True)
+    return buffer.getvalue()
+
+
 def chunk(name: bytes, payload: bytes) -> bytes:
     return name + struct.pack("<Q", len(payload)) + payload
 
@@ -147,6 +168,10 @@ def main() -> None:
     if args.with_probe_media:
         files["probe.bmp"] = make_probe_bmp()
         files["tone.wav"] = make_probe_wav()
+        for index in range(1, 7):
+            webp = make_probe_webp(index)
+            if webp:
+                files[f"pfbg{index:04d}.png"] = webp
     archive = make_archive(files)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(archive)

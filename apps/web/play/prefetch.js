@@ -56,6 +56,7 @@
     imageParkPuts: 0,
     imageParkHits: 0,
     nativeDecodes: 0,
+    mainDecodes: 0,
     decodeFailures: 0,
     wasmFallbacks: 0,
     poolInflates: 0,
@@ -250,6 +251,24 @@
     return archive + "|" + storageIndex + "|" + segmentIndex;
   }
 
+  // The engine reports archive names in virtual-URL form ("file://./data.xp3");
+  // the page storage bridge's packageForPath matches the bare virtual path
+  // ("data.xp3"). Strip the URL decoration once, here, so both the readRange
+  // calls and the segment park keys agree (the engine's peekSegment passes
+  // the same raw name through the same normalization).
+  function normalizeArchive(name) {
+    return String(name || "").toLowerCase().replace(/^file:\/\//, "").replace(/^\.\//, "");
+  }
+
+  // The graphic loader probes the image park with full in-archive storage
+  // names ("file://./data.xp3>dir/pfbg0004.png") while predictions park under
+  // the bare archive entry name ("dir/pfbg0004.png"); strip the archive part.
+  function bareName(name) {
+    var text = String(name || "").toLowerCase();
+    var separator = text.lastIndexOf(">");
+    return separator >= 0 ? text.slice(separator + 1) : text;
+  }
+
   var imagePark = {
     put: function (name, info) {
       imagePixels.put(name, info.rgba);
@@ -257,10 +276,10 @@
       metrics.imageParkPuts += 1;
     },
     probe: function (name) {
-      var meta = imageMeta.get(name);
+      var meta = imageMeta.get(bareName(name));
       if (!meta) { return null; }
-      if (!imagePixels.has(name)) {
-        imageMeta.delete(name);
+      if (!imagePixels.has(bareName(name))) {
+        imageMeta.delete(bareName(name));
         return null;
       }
       metrics.imageParkHits += 1;
@@ -268,8 +287,8 @@
     },
     // returns the parked pixel array or null (used from engine EM_ASM code
     // that performs the actual HEAPU8 copy in module scope)
-    read: function (name) { return imagePixels.get(name); },
-    has: function (name) { return imagePixels.has(name); }
+    read: function (name) { return imagePixels.get(bareName(name)); },
+    has: function (name) { return imagePixels.has(bareName(name)); }
   };
   globalScope.krkr2webImagePark = imagePark;
 
@@ -351,8 +370,31 @@
     // synchronous copy phase (see Krkr2WebDecodeOffThread in LoadWEBP.cpp)
     this.pending = null;
 
+    function markWorkerBroken() {
+      // TBS WebView (Chrome 89 kernel) has no OffscreenCanvas inside
+      // workers, so the worker decode path throws on every job; hosts that
+      // block blob workers fail at spawn. Either way the page must stop
+      // posting to the dead worker and let decode() fall back to
+      // decodeOnMain (baseline runtime) - posting to a worker that always
+      // rejects left every image on the 40-100ms wasm main-thread decode
+      // (field report: decodeFailures 281, nativeDecodes 0).
+      workerBroken = true;
+      var dead = worker;
+      worker = null;
+      if (dead) {
+        try { dead.terminate(); } catch (ignored) {}
+      }
+      for (var id in jobs) {
+        var job = jobs[id];
+        delete jobs[id];
+        clearTimeout(job.timer);
+        job.reject(new Error("decode worker unavailable"));
+      }
+    }
+
     function ensureWorker() {
-      if (worker || workerBroken) { return worker; }
+      if (workerBroken) { return null; }
+      if (worker) { return worker; }
       try {
         var url = URL.createObjectURL(new Blob([DECODE_WORKER_SRC], { type: "text/javascript" }));
         try {
@@ -367,7 +409,7 @@
           delete jobs[data.id];
           clearTimeout(job.timer);
           if (data.error) {
-            if (/OffscreenCanvas|createImageBitmap/.test(data.error)) { workerBroken = true; }
+            if (/OffscreenCanvas|createImageBitmap/.test(data.error)) { markWorkerBroken(); }
             job.reject(new Error(data.error));
           } else {
             job.resolve({ w: data.w, h: data.h, rgba: new Uint8Array(data.rgba) });
@@ -375,12 +417,8 @@
         };
         worker.onerror = function (event) {
           var message = event && event.message ? event.message : "decode worker error";
-          for (var id in jobs) {
-            var job = jobs[id];
-            delete jobs[id];
-            clearTimeout(job.timer);
-            job.reject(new Error(message));
-          }
+          markWorkerBroken();
+          noteError("decode-worker-error", new Error(message));
         };
       } catch (error) {
         workerBroken = true;
@@ -423,7 +461,10 @@
         if (typeof document === "undefined" || typeof createImageBitmap !== "function") {
           return Promise.resolve(null);
         }
-        return decodeOnMain(bytes, bgra).catch(function () { return null; });
+        return decodeOnMain(bytes, bgra).then(function (info) {
+          metrics.mainDecodes += 1;
+          return info;
+        }).catch(function () { return null; });
       }
       return new Promise(function (resolve, reject) {
         var id = ++seq;
@@ -545,7 +586,7 @@
     },
     notifyOpen: function (archiveName, fileName, storageIndex, isPrediction, segments) {
       metrics.notifyOpens += 1;
-      var archive = String(archiveName || "").toLowerCase();
+      var archive = normalizeArchive(archiveName);
       var name = String(fileName || "").toLowerCase();
       if (recentNames.length > 60) { recentNames.shift(); }
       recentNames.push((isPrediction ? "+" : "") + archive + ">" + name);
@@ -576,7 +617,7 @@
     },
     // synchronous segment lookup from the engine's EnsureSegment miss path
     peekSegment: function (archive, storageIndex, segmentIndex) {
-      var key = segmentKey(String(archive || "").toLowerCase(), storageIndex, segmentIndex);
+      var key = segmentKey(normalizeArchive(archive), storageIndex, segmentIndex);
       var payload = segmentPark.get(key);
       if (payload) {
         // handed over to the engine-side cache; free the page-side copy

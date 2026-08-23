@@ -219,6 +219,16 @@
     if (!navigator.storage || typeof navigator.storage.estimate !== "function") {
       return { supported: false, enough: true, requiredBytes: this.manifest.requiredBytes - this.metrics.committedBytes };
     }
+    // krkr2web: best-effort persistence upgrade before the quota check.
+    // Non-persistent origins get a fraction-of-disk quota (a fresh desktop
+    // profile reported 3 GiB against a 4.65 GiB install); persisted storage
+    // is allowed the full disk group, and browsers that deny the request
+    // simply keep the old quota, so the call is always safe to make.
+    try {
+      if (typeof navigator.storage.persist === "function" && !await navigator.storage.persisted()) {
+        await navigator.storage.persist();
+      }
+    } catch (ignored) {}
     var estimate = await navigator.storage.estimate();
     var available = Math.max(0, Number(estimate.quota || 0) - Number(estimate.usage || 0));
     var remaining = Math.max(0, this.manifest.requiredBytes - this.metrics.committedBytes);

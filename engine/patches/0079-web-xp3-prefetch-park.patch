@@ -74,25 +74,36 @@ diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive
 +		segs.data(), (int)(segs.size() / 4));
 +}
 +
-+// numeric successor of a normalized storage name: "dir/voice00042" ->
-+// "dir/voice00043" (zero padding kept; 999 -> 1000 widens). Voice banks and
-+// numbered CG sets follow this convention across KRKR games.
++// numeric successor of a normalized storage name: "dir/voice00042.ogg" ->
++// "dir/voice00043.ogg" (zero padding kept; 999 -> 1000 widens). Voice banks
++// and numbered CG sets follow this convention across KRKR games. The digit
++// run lives in the stem: scanning from the raw tail only ever matched the
++// extension ("g" of ".ogg"), so predictions never fired on real archives
++// (first seen in the TB-X802F/TBS field report: notifyOpens 441,
++// predictedOpens 0). Split off the extension first and reattach it after.
 +static bool Krkr2WebPredictSuccessor(const ttstr &name, ttstr &out)
 +{
 +	const tjs_int len = name.GetLen();
 +	if(len <= 0 || len > 260) return false;
 +	const tjs_char *p = name.c_str();
-+	tjs_int digits = 0;
-+	while(digits < len)
++	tjs_int extStart = len;
++	for(tjs_int i = len - 1; i >= 0; i--)
 +	{
-+		const tjs_char c = p[len - digits - 1];
++		if(p[i] == TJS_W('/')) break;  // dot inside the directory part is not an extension separator
++		if(p[i] == TJS_W('.') && i + 1 < len) { extStart = i; break; }
++	}
++	const tjs_int scanEnd = extStart;
++	tjs_int digits = 0;
++	while(digits < scanEnd)
++	{
++		const tjs_char c = p[scanEnd - digits - 1];
 +		if(c >= TJS_W('0') && c <= TJS_W('9')) digits++;
 +		else break;
 +	}
 +	if(digits == 0 || digits > 9) return false;
-+	const tjs_int numpos = len - digits;
++	const tjs_int numpos = scanEnd - digits;
 +	unsigned long long v = 0;
-+	for(tjs_int i = numpos; i < len; i++)
++	for(tjs_int i = numpos; i < scanEnd; i++)
 +		v = v * 10 + (unsigned long long)(p[i] - TJS_W('0'));
 +	v++;
 +	tjs_char buf[24];
@@ -100,7 +111,15 @@ diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive
 +	do { buf[vlen++] = TJS_W('0') + (tjs_char)(v % 10); v /= 10; } while(v && vlen < 24);
 +	if(vlen > digits) digits = vlen;
 +	ttstr result(p, numpos);
-+	for(tjs_int i = digits - 1; i >= 0; i--) result += buf[i];
++	// krkr2web: zero-pad to the original width. Only vlen buf entries are
++	// written; reading buf[digits-1 .. vlen] used to pull UNINITIALIZED stack
++	// bytes, so successors of short numbers inside wider fields (0001 -> 2)
++	// produced garbage candidates ("pfbg42.png") that never existed - the
++	// prediction channel silently never fired on any game (TB-X802F field
++	// report: notifyOpens 441, predictedOpens 0).
++	for(tjs_int i = digits - 1; i >= 0; i--)
++		result += (i < vlen ? buf[i] : TJS_W('0'));
++	for(tjs_int i = extStart; i < len; i++) result += p[i];
 +	out = result;
 +	return true;
 +}
@@ -138,7 +157,24 @@ diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive
 +		ttstr normalized(item.Name);
 +		NormalizeInArchiveStorageName(normalized);
 +		ttstr candidate;
-+		if(Krkr2WebPredictSuccessor(normalized, candidate) && IsExistent(candidate))
++		const bool have_candidate = Krkr2WebPredictSuccessor(normalized, candidate);
++		const bool exists = have_candidate && IsExistent(candidate);
++		if(EM_ASM_INT({ return globalThis.krkr2webPredictionDebug ? 1 : 0; }))
++		{
++			// krkr2web: field-diagnosis switch (page console:
++			// krkr2webPredictionDebug = true) - logs, per real open, whether
++			// the successor prediction fired and why not if it did not.
++			std::string narrow_name = normalized.AsNarrowStdString();
++			std::string narrow_candidate = have_candidate ? candidate.AsNarrowStdString() : std::string("-");
++			EM_ASM(
++			{
++				if (typeof Module != 'undefined' && Module.print)
++					Module.print('KRKR2WEB_PRED_DBG name=' + UTF8ToString($0) +
++						' candidate=' + UTF8ToString($1) + ' exists=' + $2);
++			},
++			narrow_name.c_str(), narrow_candidate.c_str(), exists ? 1 : 0);
++		}
++		if(have_candidate && exists)
 +		{
 +			++Krkr2WebPredictionDepth;
 +			try
@@ -148,6 +184,16 @@ diff --git a/external/krkrz/base/XP3Archive.cpp b/external/krkrz/base/XP3Archive
 +			}
 +			catch(...)
 +			{
++				if(EM_ASM_INT({ return globalThis.krkr2webPredictionDebug ? 1 : 0; }))
++				{
++					std::string narrow_threw = candidate.AsNarrowStdString();
++					EM_ASM(
++					{
++						if (typeof Module != 'undefined' && Module.print)
++							Module.print('KRKR2WEB_PRED_DBG probe-threw name=' + UTF8ToString($0));
++					},
++					narrow_threw.c_str());
++				}
 +			}
 +			--Krkr2WebPredictionDepth;
 +		}

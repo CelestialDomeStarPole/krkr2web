@@ -24,17 +24,35 @@
 // and reports the dimensions; phase 2 performs the synchronous copy. No
 // suspension happens between the phases, so no other callback can run wasm
 // code (and grow the heap) in between.
+//
+// The await is raced against an 8s timeout and publishes an async trace:
+// without the timeout a WebView whose createImageBitmap never settles (or
+// whose decode worker is blocked) suspends the engine forever - field
+// reports showed 40s+ main-loop stalls with no pending-op trace, because
+// this was the only untraced, timeout-less suspension left in the engine.
 EM_ASYNC_JS(int, krkr2web_webp_request, (int bgra, const unsigned char *src, int len, int w, int h),
 {
 	const decoder = globalThis.krkr2webImageDecoder;
 	if (!decoder || typeof decoder.decode != 'function') return 0;
+	const trace = {
+		op: "webp-native-decode",
+		detail: len + " bytes -> " + w + "x" + h,
+		startedAt: Date.now()
+	};
+	globalThis.krkr2webAsyncTrace = trace;
 	try {
 		const bytes = HEAPU8.slice(src, src + len);
-		const info = await decoder.decode('', bytes, bgra != 0);
+		const info = await Promise.race([
+			decoder.decode('', bytes, bgra != 0),
+			new Promise(function (resolve, reject) {
+				setTimeout(function () { reject(new Error('webp decode timeout after 8000 ms')); }, 8000);
+			})
+		]);
 		if (!info || !info.rgba || info.w != w || info.h != h) return 0;
 		decoder.pending = { rgba: info.rgba };
 		return ((info.w & 0xffff) << 16) | (info.h & 0xffff);
 	} catch (e) { return 0; }
+	finally { if (globalThis.krkr2webAsyncTrace === trace) globalThis.krkr2webAsyncTrace = null; }
 });
 
 EM_JS(int, krkr2web_webp_take, (unsigned char *out, int cap),

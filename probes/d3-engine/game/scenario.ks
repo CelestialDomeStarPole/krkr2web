@@ -18,6 +18,25 @@
 [else]
 [probe phase=error text="The KAG condition tag failed."]
 [endif]
+
+; krkr2web: numbered WebP sequence. Each click-driven open predicts its
+; numeric successor (engine patch 0079), the page prefetches it into the
+; segment / image parks (play/prefetch.js), and the next open consumes the
+; park and rides the off-thread WebP decode chain. The pump stops at every
+; [wait], so one click advances one image.
+[image storage="pfbg0001.png" layer=0 page=back]
+[wait]
+[image storage="pfbg0002.png" layer=0 page=back]
+[wait]
+[image storage="pfbg0003.png" layer=0 page=back]
+[wait]
+[image storage="pfbg0004.png" layer=0 page=back]
+[wait]
+[image storage="pfbg0005.png" layer=0 page=back]
+[wait]
+[image storage="pfbg0006.png" layer=0 page=back]
+[emit phase=prefetch text="Numbered WebP prefetch sequence finished."]
+
 [choice]
 
 *left

@@ -116,6 +116,16 @@ function d3ProbePumpKag()
             d3ProbeBranch = tag.branch;
             d3ProbeSaveKag(tag.branch);
             d3ProbeDraw();
+        } else if(name == "image") {
+            // krkr2web: run the numbered WebP through the real graphic loader
+            // (archive stream -> prediction -> page prefetch -> park -> decode)
+            // instead of skipping it like other unknown tags.
+            try {
+                d3ProbeLayer.loadImages(tag.storage, clNone);
+                Debug.message("KRKR2WEB_D3_PREFETCH_IMAGE", tag.storage);
+            } catch(error) {
+                Debug.message("KRKR2WEB_D3_PREFETCH_IMAGE_ERROR", tag.storage, error.message);
+            }
         } else if(name == "end") {
             d3ProbeStage = "restored";
             d3ProbeDraw();
