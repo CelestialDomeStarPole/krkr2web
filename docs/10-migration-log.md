@@ -32,7 +32,7 @@ WebView）迁移优化方法的全过程：已批准计划、阶段状态、关�
 | 编号 | 优化项 | 优先级 | 状态 |
 |---|---|---|---|
 | P0-1 | 主循环 RAF 帧率限制 | P0 | **已完成**（2026-08-23 桌面验证通过） |
-| P0-2 | `TVPGetRoughTickCount32` 软件锁相环 | P0 | 未开始 |
+| P0-2 | `TVPGetRoughTickCount32` 软件锁相环 | P0 | **已完成**（2026-08-23，构建+引擎闭环冒烟通过） |
 | P0-3 | 文件读取“大读直读、不污染 LRU” | P0 | 未开始 |
 | P1-1 | WebGL shader 精度修复 | P1 | 未开始 |
 | P1-2 | 跨标签页引擎单例（Web Locks） | P1 | 未开始 |
@@ -82,8 +82,25 @@ shared-memory 预分配降档。
 
 - 目标：`TVPGetRoughTickCount32` 使用 RAF 时间戳 PLL，减少脚本计时抖动。
 - 参考：`kirikiroid2-web/cpp/core/environ/web/Platform.cpp`
-- 涉及：`engine/patches/0083-web-tick-lockstep.patch`、`engine/upstream.json`
-- 状态：未开始
+- 涉及：`engine/patches/0083-web-tick-software-pll.patch`、`engine/upstream.json`
+- 状态：**已完成**（2026-08-23，构建 + 引擎闭环冒烟通过）
+- 实现要点：
+  - PLL 状态与 `TVPWebFrameTickUpdate()` 落在
+    `external/krkrz/utils/TickCount.cpp`（`__EMSCRIPTEN__` 守卫，原生 SDL 路径
+    仍走 `SDL_GetTicks()`）；声明在 `TickCount.h`。
+  - 驱动点：`process_events_frame_gated` 顶部（每个 RAF 都驱动，含门控跳帧），
+    锁相环连续跟踪 vsync 栅格；帧门控决定逻辑帧何时采样——逻辑帧 tick 以
+    栅格槽位为单位均匀推进（Choreographer 等价行为，按门控帧率采样）。
+  - 域简化：本构建原始时钟 `emscripten_get_now()` 与 RAF 时间戳同为页面相对
+    毫秒，无需参考实现里的 `performance.timeOrigin` 换算。
+  - 逐点对齐参考实现：离群帧间隔(2~250ms 外)丢锁重同步、栅格内 0.1 慢相位
+    跟踪、n 槽位预测、双重单调护栏（PLL 域内 + 域切换钳制，2^31 以上视为
+    mod 2^32 真回卷放行）、RAF 停摆 >50ms 回退原始时钟。
+  - 单线程适配：`emscripten.h` 只在 `__EMSCRIPTEN_PTHREADS__` 下声明
+    `emscripten_is_main_runtime_thread`，用 `TVPWEB_IS_MAIN_THREAD()` 谓词宏
+    （pthread 变体走 `emscripten/threading.h`，单线程恒真）。
+- 本轮自检（按新工作流规则，未跑全量）：build_d3.ps1 全量重建 exit 0、
+  产物检查通过、`d3_browser_smoke` exit 0；PLL 量化效果留待统一审计。
 
 ### 阶段 P0-3：大读直读不污染 LRU
 
@@ -201,3 +218,29 @@ shared-memory 预分配降档。
 **下一步**：P0-2 tick 软件锁相环（补丁 0083，参考
 `kirikiroid2-web/cpp/core/environ/web/Platform.cpp` 的
 TVPWebFrameTickUpdate；RAF 时间戳捕获 `__tvpRafT` 已由 0082 铺好）。
+
+### 2026-08-23 P0-2 完成（补丁 0083 软件锁相环）
+
+- **工作流变更（用户指示）**：提交 P0-1（Windows `20c6ae4` / WSL `b11016f`，
+  WSL 侧用 `git am` 同步、需先 `git config user.name/email`）；此后每轮开发
+  只做构建 + 最小自检即直接 commit，全部完成后统一审计（记入铁律 5）。
+- 补丁 0083（`0083-web-tick-software-pll.patch`，7196B）：
+  - `external/krkrz/utils/TickCount.cpp/.h`：PLL 状态机 +
+    `TVPWebFrameTickUpdate()` + 主线程 `TVPGetRoughTickCount32` 锁相输出；
+    `src/core/sdl2/SDLApplication.cpp`：`process_events_frame_gated` 顶部
+    每 RAF 驱动（含跳帧）。
+  - 快照/生成/往返校验流程同 0082（快照目录 `build/p0083-base`，用后删除；
+    `git apply` 往返三文件全 MATCH）。
+  - 陷阱 1：单线程构建 `emscripten.h` 不声明
+    `emscripten_is_main_runtime_thread`（pthreads 专属）→ 谓词宏
+    `TVPWEB_IS_MAIN_THREAD()`。
+  - 陷阱 2：改 `#if/#else` 嵌套时数错 `#endif`（clang 报 "unterminated
+    conditional directive"）——重排分支后必须重数。
+  - 域简化：原始时钟与 RAF 时间戳同为页面相对毫秒，无需 timeOrigin 换算。
+- 构建：`upstream.json` 登记（79 个补丁，CRLF 字节级追加）；build_d3.ps1
+  全量重建 exit 0，产物检查通过。
+- 最小自检：`d3_browser_smoke` exit 0。注意：build_d3.ps1 会清掉
+  `build/d3-engine` 里的 `catalog.json`/`resource-map.json`，跑冒烟前需先
+  `tools/prepare_d3_probe.ps1`（内容版本未变时无需重启诊断服务器）。
+- **下一步**：P0-3 大读直读不污染 LRU（`probes/d3-engine/web/storage.js`，
+  参考 `kirikiroid2-web/platforms/web/vlfs.js` 的 DIRECT_READ_THRESHOLD）。

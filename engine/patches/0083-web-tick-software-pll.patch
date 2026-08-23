@@ -1,0 +1,193 @@
+--- a/external/krkrz/utils/TickCount.cpp
++++ b/external/krkrz/utils/TickCount.cpp
+@@ -22,6 +22,19 @@
+ #include <mmsystem.h>
+ #else
+ #include <time.h>
++#endif
++#endif
++
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#include <math.h>
++#ifdef __EMSCRIPTEN_PTHREADS__
++#include <emscripten/threading.h>
++#define TVPWEB_IS_MAIN_THREAD() emscripten_is_main_runtime_thread()
++#else
++// Single-threaded build: every caller is the main runtime thread.
++// (emscripten.h only declares the check under __EMSCRIPTEN_PTHREADS__.)
++#define TVPWEB_IS_MAIN_THREAD() 1
+ #endif
+ #endif
+ 
+@@ -56,11 +69,70 @@
+ #endif
+ 
+ //---------------------------------------------------------------------------
++// krkr2web (patch 0083): main-thread vsync phase-locked tick.
++// Ported from kirikiroid2-web cpp/core/environ/web/Platform.cpp. On Android
++// the engine main thread samples the tick clock from a Choreographer callback
++// whose execution lands on the vsync grid, so scripts observing
++// System.getTickCount see strictly uniform frame steps. In the browser, RAF
++// timestamps jitter 1-2ms against the grid and callback dispatch adds more
++// jitter; reading the raw clock per frame leaks that into the integer-ms
++// gates used by game scripts (missed beats / re-anchoring drift). The PLL
++// below re-anchors each frame's observable tick onto a smoothed vsync grid
++// driven by the RAF timestamp captured through __tvpRafT (installed by patch
++// 0082's main-loop wrapper). The tick value is frozen for the whole frame
++// (single thread means no RAF can fire mid-frame). When RAF is stalled
++// (modal spin loop / hidden tab) for over 50ms, or before the first frame,
++// callers get the raw clock; non-main threads keep the raw clock as well.
++// This build's clock domain is page-relative milliseconds
++// (emscripten_get_now / RAF timestamps), so unlike kirikiroid2-web no
++// timeOrigin conversion is needed here.
++//---------------------------------------------------------------------------
++#ifdef __EMSCRIPTEN__
++static double TVPWebSnapTick = -1; // current frame's locked tick (main thread only)
++static double TVPWebSnapPeriod = 0; // locked grid spacing estimate in ms
++static double TVPWebSnapUpdRaw = -1; // raw clock at last PLL update (stall detection)
++static double TVPWebLastRafT = -1; // previous frame's RAF timestamp
++static tjs_uint32 TVPWebMainLastTick = 0; // monotonic guard for the main thread
++
++// double -> tjs_uint32 must go through uint64: wasm trunc_sat saturates
++// out-of-range doubles to 0xFFFFFFFF while the engine semantics are a
++// mod-2^32 wraparound (the original integer arithmetic behavior).
++static inline tjs_uint32 TVPWebMSToTick32(double ms)
++{
++	return static_cast<tjs_uint32>(static_cast<tjs_uint64>(ms));
++}
++#endif // __EMSCRIPTEN__
++
++//---------------------------------------------------------------------------
+ // TVPGetRoughTickCount
+ // 32bit値のtickカウントを得る
+ //---------------------------------------------------------------------------
+ tjs_uint32 TVPGetRoughTickCount32()
+ {
++#if defined(TVP_COMPILING_KRKRSDL2) && defined(__EMSCRIPTEN__)
++	if( TVPWEB_IS_MAIN_THREAD() )
++	{
++		tjs_uint32 r;
++		double raw = emscripten_get_now();
++		if( TVPWebSnapTick >= 0 && raw - TVPWebSnapUpdRaw <= 50.0 )
++		{
++			r = TVPWebMSToTick32( TVPWebSnapTick );
++		}
++		else
++		{
++			// startup / RAF stalled: raw clock
++			r = TVPWebMSToTick32( raw );
++		}
++		// The locked and raw domains differ by a few ms; clamp on domain
++		// switches so the main thread stays monotonic. A fallback of 2^31
++		// or more is a true mod-2^32 wrap and passes through.
++		if( r < TVPWebMainLastTick && ( TVPWebMainLastTick - r ) < 0x80000000UL )
++			r = TVPWebMainLastTick;
++		TVPWebMainLastTick = r;
++		return r;
++	}
++	return TVPWebMSToTick32( emscripten_get_now() );
++#else
+ #ifdef TVP_COMPILING_KRKRSDL2
+ 	return SDL_GetTicks();
+ #else
+@@ -73,8 +145,61 @@
+ 	return static_cast<tjs_uint32>( now.tv_sec * 1000LL + now.tv_nsec / 1000000LL );
+ #endif
+ #endif
++#endif
+ //	return TVPTickCounter.Count();
+ }
++
++#ifdef __EMSCRIPTEN__
++//---------------------------------------------------------------------------
++// krkr2web (patch 0083): drive the tick PLL; called at the top of every
++// RAF-driven engine tick (including frame-gate skips) from
++// process_events_frame_gated in sdl2/SDLApplication.cpp.
++//---------------------------------------------------------------------------
++void TVPWebFrameTickUpdate()
++{
++	double t = EM_ASM_DOUBLE(
++	{
++		var t = globalThis.__tvpRafT;
++		return (typeof t == "number" && t >= 0) ? t : -1;
++	});
++	TVPWebSnapUpdRaw = emscripten_get_now();
++	if( t < 0 || t == TVPWebLastRafT )
++		return;
++	double prev = TVPWebLastRafT;
++	TVPWebLastRafT = t;
++	if( prev < 0 )
++		return;
++	double d = t - prev;
++	if( d < 2 || d > 250 )
++	{
++		// outlier frame gap (tab restore / long stall): drop the lock
++		TVPWebSnapTick = -1;
++		TVPWebSnapPeriod = 0;
++		return;
++	}
++	if( TVPWebSnapPeriod <= 0 || TVPWebSnapTick < 0 )
++	{
++		TVPWebSnapPeriod = d;
++		TVPWebSnapTick = t;
++		return;
++	}
++	double n = floor( d / TVPWebSnapPeriod + 0.5 );
++	if( n < 1 )
++		n = 1;
++	double slot = d / n;
++	if( fabs( slot - TVPWebSnapPeriod ) < TVPWebSnapPeriod * 0.25 )
++		TVPWebSnapPeriod += 0.05 * ( slot - TVPWebSnapPeriod );
++	double pred = TVPWebSnapTick + n * TVPWebSnapPeriod;
++	double err = t - pred;
++	if( fabs( err ) <= 2.5 )
++		pred += err * 0.1; // inside the grid: slow phase tracking filters jitter
++	else
++		pred = t; // lost lock: resynchronize to the current timestamp
++	if( pred <= TVPWebSnapTick )
++		pred = TVPWebSnapTick + 0.01; // monotonic
++	TVPWebSnapTick = pred;
++}
++#endif // __EMSCRIPTEN__
+ 
+ 
+ //---------------------------------------------------------------------------
+--- a/external/krkrz/utils/TickCount.h
++++ b/external/krkrz/utils/TickCount.h
+@@ -17,6 +17,12 @@
+ extern void TVPStartTickCount();
+ 	// this must be called before TVPGetTickCount(), in main thread.
+ 	// this function can be called more than one time.
++#ifdef __EMSCRIPTEN__
++extern void TVPWebFrameTickUpdate();
++	// krkr2web (patch 0083): call once at the top of every RAF-driven engine
++	// tick (main thread) so TVPGetRoughTickCount32 can serve a vsync
++	// phase-locked grid tick to scripts.
++#endif
+ //---------------------------------------------------------------------------
+ 
+ 
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -3044,6 +3044,9 @@
+ // Defined in sound/sdl2/OpenALWaveMixer.cpp (same patch).
+ bool TVPWebAudioRemainBelow(int threshold);
+ 
++// Defined in external/krkrz/utils/TickCount.cpp (patch 0083).
++void TVPWebFrameTickUpdate();
++
+ static double TVPWebFrameGateInterval = 1000.0 / TVPWEB_FRAME_GATE_DEFAULT_FPS;
+ static double TVPWebFrameGateLastTimestamp = -1;
+ static double TVPWebFrameGateAccumulated = 0;
+@@ -3061,6 +3064,10 @@
+ 
+ static void process_events_frame_gated()
+ {
++	// Patch 0083: feed the tick PLL on every RAF (gate skips included) so the
++	// vsync grid stays continuously tracked; scripts then read the frozen,
++	// phase-locked frame tick through TVPGetRoughTickCount32.
++	TVPWebFrameTickUpdate();
+ 	double timestamp = TVPWebNowMS();
+ 	if (TVPWebFrameGateLastTimestamp < 0)
+ 	{
