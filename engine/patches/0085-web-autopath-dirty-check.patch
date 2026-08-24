@@ -109,9 +109,12 @@
 +					TVPAutoPathTable.Add(Krkr2WebAutoPathEntries[i].first,
 +						Krkr2WebAutoPathEntries[i].second);
 +				AutoPathTableInit = true;
++				TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT ")) + ttstr((tjs_int)Krkr2WebAutoPathEntries.size()));
 +				return (tjs_uint)Krkr2WebAutoPathEntries.size();
 +			}
-+		}
++		} else {
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_AUTOPATH_SNAPSHOT_MISS list=")) + ttstr((tjs_int)TVPAutoPathList.size()) + TJS_W(" snap=") + ttstr((tjs_int)Krkr2WebAutoPathListSnapshot.size()));
++			}
 +	}
 +#else
 +	if(AutoPathTableInit) return 0;

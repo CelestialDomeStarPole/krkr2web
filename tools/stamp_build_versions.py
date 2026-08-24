@@ -22,6 +22,7 @@ HTML_ASSETS = [
     "storage.js",
     "downloader.js",
     "play/storage.js",
+    "play/prefetch.js",
     "engine-profiles.js",
     "engine-worker-host.js",
     "engine/krkrsdl2.js",
