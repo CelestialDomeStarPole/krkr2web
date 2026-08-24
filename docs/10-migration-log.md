@@ -878,3 +878,5 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 ### 下一步
 
 - 冻结当前基线 b83775bd，对话侧 p95 的下一旁路在新方案验证后再计入 1/5；验收仍以 before/after 同档四项与真机 SNAPSHOT_HIT/segmentParkHits 为准。
+
+> 2026-08-24 补测：TLG 图像离线解码（prefetch image park 2MiB 扩容 + isImageFile 判断支持 pimg/tlg）已验证无效——rate1/6 p95 均 100% 、stall 95-97%，已回退至 1MiB 基线。立绘切换时的内存拷贝与图像解码不是当前 p95 主导因素。
