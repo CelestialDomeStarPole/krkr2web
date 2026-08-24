@@ -852,6 +852,19 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
   - 结论：启动黑屏与回标题冻结的主体（31× 前缀重扫 + 5.7MB XP3 重复解析）已在限速环境下达到 ≤1/5；对话期的 `p95FrameMs` 仍需
     下一轮以 TLG 解码旁路为主攻（不在本段落计入验收）。
 
+### 2026-08-24 TLG 协作式让步试探与同档复测（2c0bbc27 已回退）
+
+- 按批次与按行两档 TLG `Asyncify` 让步均已在 `LoadTLG.cpp` 验证：rate=1 有收益（`dw stall 6097→3897/4170ms`、`p95 60.6→54.4ms`），
+  但 rate=6 被 Asyncify 调度放大为回退（`dw stall 48873→49653ms`、`p95 126.7→127ms`），判定当前对话 Pipeline 的限速瓶颈
+  不在 TLG 单线程解码长度，而在外存/inflate 与场景切换的总体并发，已回退到 `fce3a1d5` 基线（无 TLG 让步）。
+- 为验证 1/5 的真实同档口径，用同一引擎 `fce3a1d5` 重建了 `before-r1/after-r1` 与 `before-r6/after-r6`（各 30 轮、同一新游戏路径），
+  结果为平台期（rate1 `p95 54.48→54.49ms / dw 4048→4109ms`、rate6 `p95 127.25→127.45ms / dw 48266→48642ms / voice p50 617→510ms 82%`），
+  说明在当前 1MiB 预取门限与已落地的 autopath 增量/归档持有之后，对话期的进一步 1/5 需新的旁路，而非更大预取（4MiB 试探已回退）。
+- 保留证据：`bench-r1/r6`（优化前基线）、`bench-r1f/r6f`（autopath 增量后）、`bench-r1g`（TLG 按行让步的 rate=1 最优）、
+  `before-r1/r6 vs after-r1/r6`（同引擎平台期对照）。下一步仍以真机诊断的
+  `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/INCR/miss` 与 `segmentParkHits/poolInflates` 为准复核，
+  对话 p95 的下一旁路待新方案验证后再计入 1/5。
+
 ### 下一步
 
 - 以 `bench-r1/r6` 与 `bench-r1f/r6f` 的“新游戏 30 轮”同档口径锁定验收数据，`voice p50/p95、dialogueWindow stall/longTask、p95FrameMs` 四项对齐；
