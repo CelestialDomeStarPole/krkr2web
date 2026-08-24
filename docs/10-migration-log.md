@@ -829,9 +829,23 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
   中正常启动；快照回放与归档持有在本地基准中命中。
 - 本轮未完成语音/立绘切换的端到端 1/5 验收（需修复基准脚本的存档加载路径后重测），
   读档黑屏的 52×200ms 主体开销已消除。
+- **bench 存档路径缺陷已修**：`tests/d5_throttled_bench.js` 的存档加载此前走空槽（`voiceCount 0`，对话零度量），
+  本轮改为“标题 新游戏 直接进场 + 循环点击”路径（`build/tmp-audio-probe.js` 同款），
+  `bench-r1` 已可度量（`voiceCount 8`, `spriteSwitchRounds 3`, `voice p50 222ms/p95 651ms`），
+  诊断报告侧 3 份最新样本（052619/065137/083908）`segmentParkHits 1→6→3`、`poolInflates 428–475` 已有命中。
+- **版本戳补齐**：`tools/stamp_build_versions.py:20` 此前漏 `play/prefetch.js`（无 `?v=`），WebView 缓存曾导致桌面有声无画；
+  已补入 `HTML_ASSETS`。
+
+### 验证再测（build be062aa1，仍不可直接与旧 smoke 同比）
+
+- 引擎 `build/be062aa1`、`D5-product` 已重新部署到 `8443`（含 `prefetch.js?v=f3dea460`），
+  `bench-r1`（rate=1）`boot stallTotal 1370ms`、`dialogueWindow stallTotal 6097ms（单次场景过渡）`；
+  `bench-r6`（rate=6）`dialogueWindow 48873ms/28 stalls` 为限速放大效应。
+  旧 `smoke/opt-r1` 用存档路径未进对话，`voiceCount 0`，不能作为 1/5 基线同比。
+- **autopath 快照可观测性**：补丁 0085 增加 `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/MISS` 日志（待真机报告验证命中率），
+  已提交 `00c6c2a`；下一次真机诊断无需再靠推断。
 
 ### 下一步
 
-- 修基准脚本的继续/存档槽坐标与存档恢复判定，使 `voiceCount>0` 后按同 rate 对比
-  `voiceStartLatency / p95FrameMs / longTaskTotal / stallTotal` 四项 ≤1/5；
-- 真机复测以诊断报告为准（autopath 重建次数、XP3 索引 `SNAPSHOT_HIT`、PERF 窗口）。
+- 以 `bench-r1` 的新游戏路径为基线重建“优化前/优化后”同路径对比（同 rate 的 `voiceStartLatency / p95FrameMs / longTaskTotal / stallTotal` 四项 ≤1/5）；
+- 真机复测以诊断报告为准（autopath 重建次数、`KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT`、PERF 窗口、`segmentParkHits`）。
