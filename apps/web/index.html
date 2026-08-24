@@ -40,6 +40,37 @@
       } catch (error) {}
     })();
   </script>
+  <script>
+    // krkr2web: audio black box. The TB-X802F field reports show dialogue
+    // audio dying progressively ("stutters twice then total silence") while
+    // every other counter looks healthy, and the report's audio block is
+    // sampled after the user force-stops (closeAudioContext nulls the
+    // context first), so mid-session audio state was invisible. Record, from
+    // the earliest point possible: every AudioBufferSourceNode.start (the
+    // engine's OpenAL schedules one per ~125ms unit - a growing count means
+    // the engine IS scheduling audio and silence lives in output routing),
+    // and the owning context's state at sample time. player.js adds the
+    // resume watchdog and ships this in every snapshot/report.
+    (function () {
+      try {
+        var probe = { starts: 0, startsLog: [], resumeAttempts: [] };
+        window.__krkr2webAudioProbe = probe;
+        var originalStart = AudioBufferSourceNode.prototype.start;
+        AudioBufferSourceNode.prototype.start = function () {
+          probe.starts += 1;
+          var last = probe.startsLog[probe.startsLog.length - 1];
+          if (!last || probe.starts - last.c >= 25) {
+            probe.startsLog.push({
+              t: Date.now(), c: probe.starts,
+              s: this.context ? this.context.state : null
+            });
+            if (probe.startsLog.length > 240) { probe.startsLog.shift(); }
+          }
+          return originalStart.apply(this, arguments);
+        };
+      } catch (error) {}
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">

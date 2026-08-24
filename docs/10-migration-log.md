@@ -738,3 +738,52 @@ segmentParkHits 0`、`imageParkPuts 24 / imageParkHits 0`（园只进不出）�
 - `segmentParkHits > 0` 且 `segmentParkBytes > 0`（RC5b）；
 - 有声对话期间 PERF 不再出现 avg_ms > 500 的窗口，语音不中断（RC5c）；
 - `skippedLargeFiles > 0`（大 CG 被闸门跳过属预期）。
+
+## 2026-08-24 第三份真机报告：音频黑匣子（对话无声 + 回标题卡死的取证）
+
+报告 `diagnostic-reports/20260824-052619-95410916.json`（RC5 修复后的
+首次真机复测）：**预取/解码修复全部在真机生效**——`segmentParkHits 1 /
+segmentParkBytes 49518`（RC5b 段园消费首次在真机闭环）、`mainDecodes 0 /
+workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
+报告对话全程无声、回标题后卡死（`*gobacktitle` → 标题启动序列在
+`VIDEO_STOP` 处停止，PERF avg 512-625ms 后日志终止，最终用户工具栏强停）。
+
+### 取证结论（本轮分析）
+
+- **报告的 `audio` 块是验尸采样**：`terminateInstance → closeAudioContext`
+  先把 `activeAudioContext` 置空再 `persistEvidence`，所以
+  `state:null/bridgeArmed:false` 是强停之后的状态，会话中的音频状态
+  从未被记录过（上一份报告同样如此，该字段两份报告一模一样）。
+- **桌面同构探针**（钩 `AudioBufferSourceNode.start` + AudioContext
+  状态采样，同一页面+引擎）：对话语音期间调度持续增长（每 10s 约
+  100-280 次）、上下文 48kHz running——引擎调度路径在本轮改动后正常，
+  无声不是调度逻辑回归。
+- **渐进式音频死亡是既有症状**：上一份报告的体感就是"卡了两下甚至
+  彻底没声音"；本轮引擎侧音频唯一改动是 QUEUE_LOOKAHEAD 0.25→0.75
+  （桌面验证无害，保留）。
+- 混音器 underrun 恢复逻辑（OpenALWaveMixer EnsurePlayState）审查无缺陷；
+  `alGetSourcei A004` 在 VIDEO_STOP 后出现为既有噪声（第一份报告已有）。
+
+### 本轮改动：页面侧音频黑匣子 + 挂起自愈
+
+- `apps/web/index.html`：最早内联脚本钩
+  `AudioBufferSourceNode.prototype.start`——计数 + 每 25 次采样一次
+  所属上下文状态（240 条环形）。**引擎是否在调度音频**从此有据可查：
+  starts 增长而无声 → 输出路由/内核问题；starts 为 0 → AL 设备创建
+  失败或混音器死亡。
+- `apps/web/player.js`：3s 看门狗，发现上下文 `suspended/interrupted`
+  即 `resume()` 并记录每次尝试（成功即修复该失效模式；被拒则证据入
+  报告）；`snapshot().audio.probe` 携带 starts/startsLog/resumeAttempts
+  进每份诊断报告。
+
+### 下一份报告的判读标准
+
+- `audio.probe.starts` 在对话期间持续增长 + `startsLog[].s` 全程
+  "running" → 声音在 WebAudio 图内正常调度，无声是 TBS 内核输出路由
+  问题（下一步：内核级音频输出方案）；
+- `startsLog[].s` 出现 "suspended" → 看门狗是否 resume 成功
+  （resumeAttempts）；
+- `starts` 长时间为 0 → 引擎 AL 设备创建失败/混音器死亡（引擎侧排查）；
+- 回标题卡死：看卡死点前后 PERF 与 engineLog 尾部（本轮卡在标题启动
+  序列 `VIDEO_STOP` 后，主循环 avg 512-625ms——与读档期 22.5s 长停顿
+  的设备性能状态一致，待音频结论后单独归因）。

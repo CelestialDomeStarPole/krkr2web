@@ -414,6 +414,38 @@
       (instance && instance.SDL2 && instance.SDL2.audioContext) || activeAudioContext;
   }
 
+  // krkr2web: Android kernels (TBS especially) suspend AudioContexts on
+  // their own - audio focus loss, kernel-level interruptions - which presents
+  // as dialogue audio dying while every engine counter stays healthy. Resume
+  // proactively and record every attempt: a successful resume IS the fix for
+  // that failure mode; a rejected one leaves the evidence in the report.
+  setInterval(function () {
+    var probe = window.__krkr2webAudioProbe;
+    var context = audioContextOf(moduleInstance);
+    if (!context || (context.state !== "suspended" && context.state !== "interrupted")) { return; }
+    var entry = { at: new Date().toISOString(), from: context.state };
+    var record = function () {
+      if (probe) {
+        probe.resumeAttempts.push(entry);
+        if (probe.resumeAttempts.length > 40) { probe.resumeAttempts.shift(); }
+      }
+    };
+    try {
+      var resumePromise = context.resume();
+      if (resumePromise && typeof resumePromise.then === "function") {
+        resumePromise.then(function () {
+          entry.ok = true; entry.to = context.state; record();
+        }, function (error) {
+          entry.ok = false; entry.error = errorText(error); record();
+        });
+      } else {
+        entry.ok = true; entry.to = context.state; record();
+      }
+    } catch (error) {
+      entry.ok = false; entry.error = errorText(error); record();
+    }
+  }, 3000);
+
   function restoreAudioContextBridge() {
     if (!audioContextBridgeRestore) { return; }
     audioContextBridgeRestore();
@@ -550,7 +582,15 @@
         active: !!audioContext,
         state: audioContext ? audioContext.state : null,
         sampleRate: audioContext ? audioContext.sampleRate : null,
-        bridgeArmed: !!audioContextBridgeRestore
+        bridgeArmed: !!audioContextBridgeRestore,
+        // mid-session audio health (see the black box in index.html): starts
+        // counts engine OpenAL schedulings of WebAudio sources; startsLog
+        // samples the owning context state as playback proceeds
+        probe: window.__krkr2webAudioProbe ? {
+          starts: window.__krkr2webAudioProbe.starts,
+          startsLog: window.__krkr2webAudioProbe.startsLog.slice(-60),
+          resumeAttempts: window.__krkr2webAudioProbe.resumeAttempts.slice(-10)
+        } : null
       },
       saveSyncCount: saveSyncCount,
       launch: launchEvidence && Object.assign({}, launchEvidence),
