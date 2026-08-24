@@ -1,0 +1,69 @@
+# krkr2web: off-thread TLG decode toggle (per-line Asyncify yield, default off).
+#
+# TLG5/6 decoding is the last large synchronous task on the dialogue path.
+# Always-on chunking adds Asyncify overhead to every load (rate=6: 48s->49s).
+# This makes it opt-in via -tlgasync=1 so behaviour stays unchanged by default
+# and the bench harness can opt in with ?tlgasync=1 when measuring p95.
+--- a/external/krkrz/visual/LoadTLG.cpp
++++ b/external/krkrz/visual/LoadTLG.cpp
+@@ -17,6 +17,21 @@
+ #include "tjsDictionary.h"
+ 
+ #include <stdlib.h>
++
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++static bool Krkr2WebTlgAsyncEnabled = false;
++void Krkr2WebSetTlgAsyncEnabled(bool v) { Krkr2WebTlgAsyncEnabled = v; }
++EM_ASYNC_JS(void, krkr2web_tlg_yield, (), {
++  await new Promise(function (resolve) { setTimeout(resolve, 0); });
++});
++static inline void Krkr2WebTlgMaybeYield(int n) {
++  if (Krkr2WebTlgAsyncEnabled && ((n) & 7) == 0) krkr2web_tlg_yield();
++}
++#else
++static inline void Krkr2WebTlgMaybeYield(int) {}
++void Krkr2WebSetTlgAsyncEnabled(bool) {}
++#endif
+ 
+ /*
+ 	TLG5:
+@@ -178,6 +193,7 @@
+ 					}
+ 				}
+ 				scanlinecallback(callbackdata, -1);
++				Krkr2WebTlgMaybeYield((int)y);
+ 
+ 				prevline = current_org;
+ 			}
+@@ -406,6 +422,7 @@
+ 				}
+ 
+ 				scanlinecallback(callbackdata, -1);
++				Krkr2WebTlgMaybeYield((int)yy);
+ 				prevline = curline;
+ 			}
+ 		}
+--- a/src/core/base/sdl2/SysInitImpl.cpp
++++ b/src/core/base/sdl2/SysInitImpl.cpp
+@@ -1534,7 +1534,19 @@
+ 		TVPGraphicCacheSystemLimit = 160 * 1024 * 1024;
+ 	if(TVPGetGraphicCacheLimit() == 0)
+ 		TVPSetGraphicCacheLimit(TVPGraphicCacheSystemLimit);
+-	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_GRAPHIC_CACHE ")) +
++extern void Krkr2WebSetTlgAsyncEnabled(bool);
++	{
++		tTJSVariant tlgOpt;
++		if (TVPGetCommandLine(TJS_W("-tlgasync"), &tlgOpt)) {
++			ttstr tv(tlgOpt);
++			bool on = (tv == TJS_W("1") || tv == TJS_W("on") || tv == TJS_W("true") || tv == TJS_W("yes"));
++			Krkr2WebSetTlgAsyncEnabled(on);
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_TLG_ASYNC ")) + ttstr(on ? TJS_W("on") : TJS_W("off")));
++		} else {
++			Krkr2WebSetTlgAsyncEnabled(false);
++		}
++	}
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_GRAPHIC_CACHE ")) +
+ 		ttstr((tjs_int)(TVPGraphicCacheSystemLimit / (1024 * 1024))));
+ 	// krkr2web: widen the OpenAL scheduling lookahead. The default 100ms is
+ 	// shorter than a single transition blend frame on weak devices, so any

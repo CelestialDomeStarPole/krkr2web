@@ -130,7 +130,13 @@
     profile.autoPathPackages.forEach(function (path) {
       args.push("-krkr2web-autopath=/" + path + ">");
     });
-    return args.concat(profile.engineArguments);
+    var extra = profile.engineArguments.slice();
+    try {
+      if (/(?:^|[&?])tlgasync=1(?:&|$)/.test(location.search)) {
+        extra.push("-tlgasync=1");
+      }
+    } catch (e) {}
+    return args.concat(extra);
   }
 
   function isDiagnosticNoise(message) {

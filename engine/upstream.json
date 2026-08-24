@@ -222,6 +222,7 @@
     "patches/0083-web-tick-software-pll.patch",
     "patches/0084-web-sync-exit-graceful-reroute.patch",
     "patches/0085-web-autopath-dirty-check.patch",
-    "patches/0086-web-xp3-index-snapshot.patch"
+    "patches/0086-web-xp3-index-snapshot.patch",
+    "patches/0087-web-tlg-async-toggle.patch"
   ]
 }

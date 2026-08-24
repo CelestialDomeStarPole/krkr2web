@@ -101,7 +101,11 @@ async function main() {
 
     // ---------- boot ----------
     const bootT0 = Date.now();
-    await page.goto(BASE_URL + "/?engineVariant=baseline", { waitUntil: "networkidle", timeout: 60000 });
+    {
+      var __base = BASE_URL.replace(/\/+$/, "");
+      var __join = __base.indexOf("?") !== -1 ? "&" : "?";
+      await page.goto(__base + __join + "engineVariant=baseline", { waitUntil: "networkidle", timeout: 60000 });
+    }
     await page.waitForFunction(function () {
       return window.d4AppState && window.d4AppState().catalog;
     }, null, { timeout: 30000 });

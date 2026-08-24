@@ -852,21 +852,15 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
   - 结论：启动黑屏与回标题冻结的主体（31× 前缀重扫 + 5.7MB XP3 重复解析）已在限速环境下达到 ≤1/5；对话期的 `p95FrameMs` 仍需
     下一轮以 TLG 解码旁路为主攻（不在本段落计入验收）。
 
-### 2026-08-24 TLG 协作式让步试探与同档复测（2c0bbc27 已回退）
+### 2026-08-24 TLG 异步档位（0087，默认关闭）与同档四项复测
 
-- 按批次与按行两档 TLG `Asyncify` 让步均已在 `LoadTLG.cpp` 验证：rate=1 有收益（`dw stall 6097→3897/4170ms`、`p95 60.6→54.4ms`），
-  但 rate=6 被 Asyncify 调度放大为回退（`dw stall 48873→49653ms`、`p95 126.7→127ms`），判定当前对话 Pipeline 的限速瓶颈
-  不在 TLG 单线程解码长度，而在外存/inflate 与场景切换的总体并发，已回退到 `fce3a1d5` 基线（无 TLG 让步）。
-- 为验证 1/5 的真实同档口径，用同一引擎 `fce3a1d5` 重建了 `before-r1/after-r1` 与 `before-r6/after-r6`（各 30 轮、同一新游戏路径），
-  结果为平台期（rate1 `p95 54.48→54.49ms / dw 4048→4109ms`、rate6 `p95 127.25→127.45ms / dw 48266→48642ms / voice p50 617→510ms 82%`），
-  说明在当前 1MiB 预取门限与已落地的 autopath 增量/归档持有之后，对话期的进一步 1/5 需新的旁路，而非更大预取（4MiB 试探已回退）。
-- 保留证据：`bench-r1/r6`（优化前基线）、`bench-r1f/r6f`（autopath 增量后）、`bench-r1g`（TLG 按行让步的 rate=1 最优）、
-  `before-r1/r6 vs after-r1/r6`（同引擎平台期对照）。下一步仍以真机诊断的
-  `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/INCR/miss` 与 `segmentParkHits/poolInflates` 为准复核，
-  对话 p95 的下一旁路待新方案验证后再计入 1/5。
+- 新增补丁 **0087 LoadTLG.cpp + SysInitImpl.cpp TLG 异步档位**：TLG5/6 每 8 行一次 EM_ASYNC_JS krkr2web_tlg_yield（setTimeout 0 的 Asyncify 挂起），由命令行 -tlgasync=1 统一开关；SysInit 新增 KRKR2WEB_D5_TLG_ASYNC on/off 日志，player.js 将 ?tlgasync=1 透传为引擎参数，d5_throttled_bench.js 的 ?engineVariant 拼接已修复（?/& 双问号曾致 on-r1 失败）。默认关闭，行为与 fce3a1d5 一致（b83775bd 已验证同样产物校验 Asyncify、无 SAB/JSPI）。
+- **同引擎同路径四项对比（OFF vs ON，30 轮新游戏）**：
+  - rate=1：voice p50 197→181ms / p95 258→211ms、dialogueWindow stall 4079→3927ms (96%) / longTask 20421→19864ms (97%)、p95FrameMs 54.51→54.49ms (100%)；
+  - rate=6：voice p50 654→577ms / p95 662→629ms、dialogueWindow stall 49750→48509ms (98%) / longTask 69139→66818ms (97%)、p95FrameMs 127.29→126.98ms (100%)；
+  - 结论：异步档位在当前对话路径上仅小幅平缓 longTask，p95 与 stall 未达 1/5；已保持默认 OFF，不计入验收。
+- **总体四项 1/5 判定**：以同引擎 before/after（fce3a1d5）平台期为准，当前对话管线四项在限速 1/6 下均未达到 1/5；已落地的 1/5 为读档/启动侧 autopath 31 次前缀重扫 + 5.7MB XP3 重复解压（boot stall 27903→4431ms 等）。下一步仍以真机诊断的 KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/INCR/miss 与 segmentParkHits/poolInflates 复核，对话 p95 需新的旁路（非更大预取、非更密让步）后再计入验收。
 
 ### 下一步
 
-- 以 `bench-r1/r6` 与 `bench-r1f/r6f` 的“新游戏 30 轮”同档口径锁定验收数据，`voice p50/p95、dialogueWindow stall/longTask、p95FrameMs` 四项对齐；
-  已有 `bench-r6` 的两项（boot、dialogueWindow stall）满足 1/5，真机仍以 `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/INCR` 与 `segmentParkHits` 为准。
-- TLG 主线程解码（对话大图 p95 余量）列为下一优化项，待真机回执后排期。
+- 保持 0087 默认关闭（b83775bd），对话侧的下一旁路在新方案验证后再计入 1/5；验收仍以 before/after 同档四项与真机 SNAPSHOT_HIT/segmentParkHits 为准。
