@@ -864,3 +864,17 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 ### 下一步
 
 - 保持 0087 默认关闭（b83775bd），对话侧的下一旁路在新方案验证后再计入 1/5；验收仍以 before/after 同档四项与真机 SNAPSHOT_HIT/segmentParkHits 为准。
+
+### 本轮完成度审计（四项1/5）
+
+- 目标：读档黑屏、对话音频加载、立绘/音频切换四项的 CPU 占用与延迟均降至原先的 1/5。验收口径：b bench 新游戏路径同档对比 rate=1/6 下 voiceStartLatency p50/p95、dialogueWindow stallTotal/longTaskTotal、p95FrameMs；真机以 KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT 与 segmentParkHits 复核。
+- 已达标：读档/启动黑屏——autopath 31 次前缀重扫 + 5.7MB XP3 重复解压已在 bench 上达到 1/5（boot stall 27903→4431ms），真机 083908 上已见 GRAPHIC_CACHE 160 / AUTOPATH 日志与 Parks 持有。
+- 未达标（同引擎同路径响应）：
+  - before/after（fce3a1d5）：rate1 voice p50 192→203(106%) / p95 212→218(103%) / stall 4048→4109(102%) / longTask 19980→20128(101%) / p95FrameMs 54.5→54.5(100%)；rate6 voice p50 617→510(83%) / p95 669→545(81%) / stall 48266→48642(101%) / p95 127.2→127.5(100%)；
+  - OFF vs ON（当前 b83775bd）：rate1 p95FrameMs 100%、stall 96%、longTask 97%；rate6 p95FrameMs 100%、stall 98%、longTask 97%；历史最优 bench-r6f 仅为 stall 24.2% / p95 62%，均未达 20%。
+  - 真机复核：083908 仍为旧构建 a6b42c58，无新 b83775bd 样本的 SNAPSHOT_HIT/INCR 与 segmentParkHits 新证据。
+- 判断：当前对话管线已在平台期；TLG 0087 已交付默认关闭，不计入验收；预取门限 4MiB 扩张已验证无效已回退。下一有效旁路待新方案验证后再计入。
+
+### 下一步
+
+- 冻结当前基线 b83775bd，对话侧 p95 的下一旁路在新方案验证后再计入 1/5；验收仍以 before/after 同档四项与真机 SNAPSHOT_HIT/segmentParkHits 为准。
