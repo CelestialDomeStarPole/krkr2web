@@ -1,0 +1,158 @@
+--- a/external/krkrz/base/StorageIntf.cpp
++++ b/external/krkrz/base/StorageIntf.cpp
+@@ -1046,84 +1046,127 @@
+ tTJSHashTable<ttstr, tTVPFileInfo, tTJSHashFunc<ttstr>, TVP_AUTO_PATH_HASH_SIZE>
+ 	TVPAutoPathTable;
+ bool AutoPathTableInit = false;
++#ifdef __EMSCRIPTEN__
++// krkr2web (patch 0085): keep a snapshot of the last successful autopath
++// table so that a soft clear (compact/fstat without any AutoPathList change)
++// can restore it instantly. The snapshot is validated by the full ordered
++// AutoPathList -- only an identical list restores, so genuine add/remove
++// still forces a full filesystem scan.
++static std::vector<ttstr> Krkr2WebAutoPathListSnapshot;
++static std::vector<std::pair<ttstr, tTVPFileInfo>> Krkr2WebAutoPathEntries;
++static bool Krkr2WebSnapshotValid = false;
++static bool Krkr2WebAutoPathListEqualsSnapshot()
++{
++	if (TVPAutoPathList.size() != Krkr2WebAutoPathListSnapshot.size()) return false;
++	for (size_t i = 0; i < TVPAutoPathList.size(); ++i)
++		if (TVPAutoPathList[i] != Krkr2WebAutoPathListSnapshot[i]) return false;
++	return true;
++}
++#endif
+ //---------------------------------------------------------------------------
+ static void TVPClearAutoPathCache()
+ {
+ 	TVPAutoPathCache.Clear();
+ 	TVPAutoPathTable.Clear();
+ 	AutoPathTableInit = false;
+ }
+ //---------------------------------------------------------------------------
+ struct tTVPClearAutoPathCacheCallback : public tTVPCompactEventCallbackIntf
+ {
+ 	virtual void TJS_INTF_METHOD OnCompact(tjs_int level)
+ 	{
+ 		if(level >= TVP_COMPACT_LEVEL_DEACTIVATE)
+ 		{
+ 			// clear the auto search path cache on application deactivate
+ 			tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+ 			TVPClearAutoPathCache();
+ 		}
+ 	}
+ } static TVPClearAutoPathCacheCallback;
+ static bool TVPClearAutoPathCacheCallbackInit = false;
+ //---------------------------------------------------------------------------
+ void TVPAddAutoPath(const ttstr & name)
+ {
+ 	tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+ 
+ 	tjs_char lastchar = name.GetLastChar();
+ 	if(lastchar != TVPArchiveDelimiter && lastchar != TJS_W('/') && lastchar != TJS_W('\\'))
+ 		TVPThrowExceptionMessage(TVPMissingPathDelimiterAtLast);
+ 
+ 	ttstr normalized = TVPNormalizeStorageName(name);
+ 
+ 	std::vector<ttstr>::iterator i =
+ 		std::find(TVPAutoPathList.begin(), TVPAutoPathList.end(), normalized);
+-	if(i == TVPAutoPathList.end())
++	if(i == TVPAutoPathList.end()) {
+ 		TVPAutoPathList.push_back(normalized);
+-
+-	TVPClearAutoPathCache();
++		TVPClearAutoPathCache();
++#ifdef __EMSCRIPTEN__
++		Krkr2WebSnapshotValid = false;
++		Krkr2WebAutoPathListSnapshot.clear();
++		Krkr2WebAutoPathEntries.clear();
++#endif
++	}
+ }
+ //---------------------------------------------------------------------------
+ void TVPRemoveAutoPath(const ttstr &name)
+ {
+ 	tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+ 
+ 	tjs_char lastchar = name.GetLastChar();
+ 	if(lastchar != TVPArchiveDelimiter && lastchar != TJS_W('/') && lastchar != TJS_W('\\'))
+ 		TVPThrowExceptionMessage(TVPMissingPathDelimiterAtLast);
+ 
+ 	ttstr normalized = TVPNormalizeStorageName(name);
+ 
+ 	std::vector<ttstr>::iterator i =
+ 		std::find(TVPAutoPathList.begin(), TVPAutoPathList.end(), normalized);
+-	if(i != TVPAutoPathList.end())
++	if(i != TVPAutoPathList.end()) {
+ 		TVPAutoPathList.erase(i);
+-
+-	TVPClearAutoPathCache();
++		TVPClearAutoPathCache();
++#ifdef __EMSCRIPTEN__
++		Krkr2WebSnapshotValid = false;
++		Krkr2WebAutoPathListSnapshot.clear();
++		Krkr2WebAutoPathEntries.clear();
++#endif
++	}
+ }
+ //---------------------------------------------------------------------------
+ static tjs_uint TVPRebuildAutoPathTable()
+ {
+ 	// rebuild auto path table
+-	if(AutoPathTableInit) return 0;
++#ifdef __EMSCRIPTEN__
++	if(AutoPathTableInit) return 0;
++	if(!AutoPathTableInit && Krkr2WebSnapshotValid && !Krkr2WebAutoPathEntries.empty()) {
++		if(Krkr2WebAutoPathListEqualsSnapshot()) {
++			tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
++			if(!AutoPathTableInit) {
++				for (size_t i = 0; i < Krkr2WebAutoPathEntries.size(); ++i)
++					TVPAutoPathTable.Add(Krkr2WebAutoPathEntries[i].first,
++						Krkr2WebAutoPathEntries[i].second);
++				AutoPathTableInit = true;
++				return (tjs_uint)Krkr2WebAutoPathEntries.size();
++			}
++		}
++	}
++#else
++	if(AutoPathTableInit) return 0;
++#endif
+ 
+ 	TVPInitStorageOptions();
+ 
+ 	tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+ 
+ 	TVPAutoPathTable.Clear();
+ 
+ 	tjs_uint64 tick = TVPGetTickCount();
+  	TVPAddLog( (const tjs_char*)TVPInfoRebuildingAutoPath );
+ 
+ 	tjs_uint totalcount = 0;
+ 
+ 	std::vector<ttstr>::iterator it;
+ 	for(it = TVPAutoPathList.begin(); it != TVPAutoPathList.end(); it++)
+ 	{
+ 		const ttstr & path = *it;
+ 		tjs_uint count = 0;
+ 
+ 		const tjs_char * sharp_pos = TJS_strchr(path.c_str(), TVPArchiveDelimiter);
+@@ -1240,12 +1283,20 @@
+ 
+ 	tjs_uint64 endtick = TVPGetTickCount();
+ 
+ 	TVPAddLog(ttstr(TJS_W("(info) Total ")) +
+ 				ttstr((tjs_int)totalcount) + TJS_W(" file(s) found, ") +
+ 				ttstr((tjs_int)TVPAutoPathTable.GetCount()) + TJS_W(" file(s) activated.") + 
+ 				TJS_W(" (") + ttstr((tjs_int)(endtick - tick)) + TJS_W("ms)"));
+ 
++#ifdef __EMSCRIPTEN__
++	Krkr2WebAutoPathListSnapshot = TVPAutoPathList;
++	Krkr2WebAutoPathEntries.clear();
++	Krkr2WebAutoPathEntries.reserve((size_t)TVPAutoPathTable.GetCount());
++	for (auto it2 = TVPAutoPathTable.GetFirst(); !it2.IsNull(); ++it2)
++		Krkr2WebAutoPathEntries.push_back(std::make_pair(it2.GetKey(), it2.GetValue()));
++	Krkr2WebSnapshotValid = true;
++#endif
+ 	AutoPathTableInit = true;
+ 
+ 	return totalcount;
+ }

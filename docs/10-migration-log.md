@@ -787,3 +787,51 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 - 回标题卡死：看卡死点前后 PERF 与 engineLog 尾部（本轮卡在标题启动
   序列 `VIDEO_STOP` 后，主循环 avg 512-625ms——与读档期 22.5s 长停顿
   的设备性能状态一致，待音频结论后单独归因）。
+
+## 2026-08-24 读档黑屏与立绘/音频切换卡顿优化（本地限速验证，目标 ≤1/5）
+
+用户目标（验收改为本地浏览器 + CDP CPU 限速模拟安卓）：缩短读档黑屏、对话音频加载、
+立绘/音频切换卡顿；每项 CPU 占用与延迟降至原先 1/5。
+
+### 真机卡顿再归因（22.5s 读档黑屏 + 回标题冻结）
+
+- **52 次 autopath 重建 × 200ms**：`TVPAddAutoPath` 对重复 auto path 仍清表、
+  `TVPClearStorageCaches`（fstat 存读档/存档、`TVPDeliverCompactEvent` DEACTIVATE/
+  SystemControl 4s IDLE）清表，每次 `TVPRebuildAutoPathTable` 重新遍历归档
+  （`data.xp3` 39k 条目），报告里 `Rebuilding Auto Path Table` 出现 52 次、
+  单次 201–232ms（首次 1587ms），直接构成黑屏与回标题冻结。
+- **5.7MB XP3 索引重复解压/解析**：`tTVPXP3Archive` 每次构造都从流取索引、解压
+  （`KRKR2WEB_D5_XP3_INDEX_INPUT compressed=5679985 expanded=5683641`，worker 105ms）
+  并排序 39k 条目；标题 BGM 探针与每次 autopath 重建都触发。
+
+### 本轮改动
+
+- **补丁 0085 `StorageIntf.cpp` autopath 脏检查 + 快照回放**：重复 `TVPAddAutoPath`/
+  不存在路径的 `TVPRemoveAutoPath` 不再清表；软清表（compact/fstat）后若
+  `AutoPathList` 未变，`TVPRebuildAutoPathTable` 直接从 `Krkr2WebAutoPathEntries`
+  回放哈希表（Copy Add O(1)，~0.3ms vs 200ms），否则走全量重建并刷新快照。
+- **补丁 0086 `StorageIntf.cpp` XP3 归档持有缓存**：`tTVPArchiveCache` 外再持 3 份
+  已解析归档，`TVPClearStorageCaches` 清掉 LRU 后仍可零解压回填，避免标题/BGM
+  与 autopath 重建的重复索引开销。已登记 `engine/upstream.json`（共 82 补丁），
+  `build_d3.ps1` 全量重建通过，`prepare_d5_product.ps1 -SkipEngineBuild` 部署到
+  8443。
+- **本地限速基准**：`tests/d5_throttled_bench.js`（CDP `Emulation.setCPUThrottlingRate`，
+  rAF gap/longtask/AudioBufferSourceNode.start 采样，load 的黑屏按 4 连续 rAF <100ms
+  判定）。本次验证仅页面自洽（save 隔离导致实际未进对话，voice 计数为 0，属已知
+  基准脚本路径缺陷），不作为 1/5 的最终验收口径。
+- **基准对比（rate=1 同档）**：smoke `opt-r1` vs 旧 `smoke`（rate=1）整体
+  `stallTotal 6236→479ms (7.7%)`、`stallCount 11→1`；load `waitMs 2092→1697ms`；
+  读档期的 CPU wall 占比中软清表开销已被快照路径消除，黑屏中不再有 52 次 200ms 重建。
+
+### 验证与部署
+
+- 8443 已部署新引擎（`engine-manifest a6b42c58`），d3 自测游戏与千恋万花在桌面验证
+  中正常启动；快照回放与归档持有在本地基准中命中。
+- 本轮未完成语音/立绘切换的端到端 1/5 验收（需修复基准脚本的存档加载路径后重测），
+  读档黑屏的 52×200ms 主体开销已消除。
+
+### 下一步
+
+- 修基准脚本的继续/存档槽坐标与存档恢复判定，使 `voiceCount>0` 后按同 rate 对比
+  `voiceStartLatency / p95FrameMs / longTaskTotal / stallTotal` 四项 ≤1/5；
+- 真机复测以诊断报告为准（autopath 重建次数、XP3 索引 `SNAPSHOT_HIT`、PERF 窗口）。

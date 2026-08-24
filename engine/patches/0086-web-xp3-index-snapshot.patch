@@ -1,0 +1,71 @@
+--- a/external/krkrz/base/StorageIntf.cpp
++++ b/external/krkrz/base/StorageIntf.cpp
+@@ -753,2 +753,22 @@
+ //---------------------------------------------------------------------------
+ // tTVPArchiveCache
+ //---------------------------------------------------------------------------
++#ifdef __EMSCRIPTEN__
++// krkr2web (patch 0086): the XP3 index for senren data.xp3 is 5.68MB
++// compressed / 5.68MB expanded (39k entries). The engine re-opens the same
++// archive for every autopath rebuild (TVPRebuildAutoPathTable calls
++// TVPArchiveCache.Get(arcname)->GetCount() which constructs a fresh
++// tTVPXP3Archive) and for the *title_bgm temporary probe at return-to-title.
++// Each open inflates the 5.7MB index on the worker pool (~105ms) then parses
++// and sorts 39k entries. Keep the last few successfully opened archives alive
++// as a fallback when TVPArchiveCache has been cleared (TVPClearStorageCaches
++// from fstat/compact). Keyed by normalized name; the file is immutable.
++struct Krkr2WebArchiveHold { ttstr name; tTJSRefHolder<tTVPArchive> holder; };
++static std::vector<Krkr2WebArchiveHold> Krkr2WebArchiveHolds;
++static const size_t Krkr2WebArchiveHoldCap = 3;
++static tTVPArchive* Krkr2WebFindHeldArchive(const ttstr& name) {
++	for (auto &h : Krkr2WebArchiveHolds) if (h.name == name) return h.holder.GetObject();
++	return nullptr;
++}
++static void Krkr2WebHoldArchive(const ttstr& name, tTVPArchive* arc) {
++	for (auto &h : Krkr2WebArchiveHolds) if (h.name == name) { h.holder = tTJSRefHolder<tTVPArchive>(arc); return; }
++	if (Krkr2WebArchiveHolds.size() >= Krkr2WebArchiveHoldCap) Krkr2WebArchiveHolds.erase(Krkr2WebArchiveHolds.begin());
++	Krkr2WebArchiveHolds.push_back(Krkr2WebArchiveHold{name, tTJSRefHolder<tTVPArchive>(arc)});
++}
++#endif
+ class tTVPArchiveCache
+ {
+ 	typedef tTJSRefHolder<tTVPArchive> tHolder;
+@@ -840,9 +860,21 @@
+ 	tTVPArchive * Get(ttstr name)
+ 	{
+ 		name = TVPNormalizeStorageName(name);
+ 		tTJSCSH csh(CS);
+ 		tjs_uint32 hash = tTJSHashCache<ttstr, tHolder>::MakeHash(name);
+ 		tHolder *ptr = ArchiveCache.FindAndTouchWithHash(name, hash);
+ 		if(ptr)
+ 		{
+ 			// exist in the cache
+ 			return ptr->GetObject();
+ 		}
++#ifdef __EMSCRIPTEN__
++		if (auto *held = Krkr2WebFindHeldArchive(name)) {
++			// TVPArchiveCache was cleared (TVPClearStorageCaches) but we
++			// still hold the parsed archive -- re-seed the cache instantly
++			// instead of re-inflating the 5.7MB index.
++			tHolder holder(held);
++			ArchiveCache.AddWithHash(name, hash, holder);
++			return held;
++		}
++#endif
+ 
+ 		if(!TVPIsExistentStorageNoSearch(name))
+ 		{
+ 			// storage not found
+ 			TVPThrowExceptionMessage(TVPCannotFindStorage, name);
+ 		}
+ 
+ 		// not exist in the cache
+ 		tTVPArchive *arc = TVPOpenArchive(name);
+ 		tHolder holder(arc);
+ 		ArchiveCache.AddWithHash(name, hash, holder);
++#ifdef __EMSCRIPTEN__
++		Krkr2WebHoldArchive(name, arc);
++#endif
+ 		return arc;
+ 	}
+ 

@@ -220,6 +220,8 @@
     "patches/0081-web-audio-cushion-cache-bump.patch",
     "patches/0082-web-main-loop-frame-rate-limit.patch",
     "patches/0083-web-tick-software-pll.patch",
-    "patches/0084-web-sync-exit-graceful-reroute.patch"
+    "patches/0084-web-sync-exit-graceful-reroute.patch",
+    "patches/0085-web-autopath-dirty-check.patch",
+    "patches/0086-web-xp3-index-snapshot.patch"
   ]
 }
