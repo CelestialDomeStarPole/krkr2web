@@ -292,12 +292,34 @@ python (Join-Path $projectRoot "tools\check_worker_contract.py") `
     --glue (Join-Path $cmakeBuild "krkrsdl2.js")
 if ($LASTEXITCODE -ne 0) { throw "D3 baseline violates the Dedicated Worker contract" }
 
+# krkr2web: standalone wasm libwebp decoder for the page's WebP decode worker
+# (play/prefetch.js). WebView kernels without OffscreenCanvas inside workers
+# cannot read pixels back through a canvas, so their decodes fell onto the
+# page's main thread and starved the OpenAL scheduler. Compiled from the same
+# libwebp sources as the engine (decoder-only subset, generic C: no SIMD, no
+# threads) so the worker can decode without any canvas API.
+$webpWorkerShim = Join-Path $projectRoot "engine\webp\WebpWorker.c"
+$webpBase = Join-Path $source "external\webp"
+$webpRoot = Join-Path $webpBase "src"
+$webpDecSources = @("alpha_dec.c", "buffer_dec.c", "frame_dec.c", "idec_dec.c", "io_dec.c", "quant_dec.c", "tree_dec.c", "vp8_dec.c", "vp8l_dec.c", "webp_dec.c") | ForEach-Object { Join-Path $webpRoot ("dec\" + $_) }
+$webpDspSources = @("alpha_processing.c", "cpu.c", "dec.c", "dec_clip_tables.c", "filters.c", "lossless.c", "rescaler.c", "upsampling.c", "yuv.c") | ForEach-Object { Join-Path $webpRoot ("dsp\" + $_) }
+$webpUtilSources = @("bit_reader_utils.c", "color_cache_utils.c", "filters_utils.c", "huffman_utils.c", "palette.c", "quant_levels_dec_utils.c", "rescaler_utils.c", "random_utils.c", "thread_utils.c", "utils.c") | ForEach-Object { Join-Path $webpRoot ("utils\" + $_) }
+& $emcc $webpWorkerShim $webpDecSources $webpDspSources $webpUtilSources `
+    -O3 -I $webpBase -I $webpRoot -o (Join-Path $cmakeBuild "webp-worker.js") `
+    -s MODULARIZE=1 -s EXPORT_NAME=Krkr2WebWebpWorker `
+    -s ALLOW_MEMORY_GROWTH=1 -s ENVIRONMENT=worker `
+    -s EXPORTED_FUNCTIONS=_krkr2web_webp_decode,_krkr2web_webp_free,_malloc,_free `
+    -s EXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,HEAPU32
+if ($LASTEXITCODE -ne 0) { throw "WebP worker decoder compilation failed" }
+
 if (Test-Path $output) { Get-ChildItem -LiteralPath $output -Force | Remove-Item -Recurse -Force } else { New-Item -ItemType Directory -Force $output | Out-Null }
 Copy-Item (Join-Path $projectRoot "probes\d3-engine\web\*") $output -Recurse
 Copy-Item (Join-Path $projectRoot "probes\d2-downloader\web\storage.js") (Join-Path $output "installer-storage.js")
 Copy-Item (Join-Path $projectRoot "probes\d2-downloader\web\downloader.js") (Join-Path $output "installer.js")
 Copy-Item (Join-Path $cmakeBuild "krkrsdl2.js") $output
 Copy-Item (Join-Path $cmakeBuild "krkrsdl2.wasm") $output
+Copy-Item (Join-Path $cmakeBuild "webp-worker.js") $output
+Copy-Item (Join-Path $cmakeBuild "webp-worker.wasm") $output
 $licenseOutput = Join-Path $output "licenses"
 New-Item -ItemType Directory -Force $licenseOutput | Out-Null
 Copy-Item -LiteralPath (Join-Path $upstream "LICENSE") -Destination (Join-Path $licenseOutput "krkrsdl2.LICENSE.txt") -Force

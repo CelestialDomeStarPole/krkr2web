@@ -665,3 +665,76 @@ mainDecodes 8（页内回退）、无停摆、perf 持续输出。
 - OpenAL A004（VIDEO_STOP 后 alGetSourcei）：暂按噪声处理；
 - profile runtime 参数（maximumWasmMemoryBytes 等）仅在已退役的 worker
   运行时消费，baseline 用构建期默认值——如真机复测仍有内存压力再立项。
+
+## 2026-08-23 第二份真机报告归因：主线程解码饥饿与段园零命中（RC5a/b/c）
+
+真机报告 `diagnostic-reports/20260823-132147-3eaaf1f7.json`（同一台
+TB-X802F/TBS 046299，第一轮修复后复测）关键读数：`predictedOpens 32`
+（RC1 修复生效，预测通道已工作）但 `segmentParkPuts 31 /
+segmentParkHits 0`、`imageParkPuts 24 / imageParkHits 0`（园只进不出）；
+`mainDecodes 182`（全部 WebP 解码落在页面主线程）；PERF 出现
+`avg_ms=1921 max_ms=23290` 的窗口（23 秒级停顿，BGM 直接被打断），
+其余窗口 avg 24–204ms；体感"对话音频卡顿、卡两下后彻底没声音"。
+
+### 根因（全部实锤）
+
+- **RC5a 解码落在主线程（饥饿 OpenAL 调度器）**：TBS worker 无
+  OffscreenCanvas，第一轮的 markWorkerBroken 熔断后所有解码走
+  decodeOnMain 页内回退——每张 40–100ms 的同步 wasm 解码堆在主线程，
+  而 Emscripten OpenAL 只提前 250ms 调度音频缓冲，200–660ms 的
+  换装 tick 一来语音就断。修复：**独立 wasm libwebp 解码模块**
+  （engine/webp/WebpWorker.c → webp-worker.js/.wasm，157KB，decoder-only
+  子集、通用 C 无 SIMD/线程，满足铁律），由页面解码 worker 经
+  importScripts 惰性加载，MODULARIZE 工厂 + locateFile 绝对化；主线程
+  只做 memcpy。审计以 `krkr2webWebpForceWasm` 强制走该路径（与 TBS
+  一致）。PASS = `workerWasmDecodes > 0 且 mainDecodes === 0`。
+- **RC5b 段园键永不匹配（本轮桌面上游复现并实锤）**：notifyOpen 传原始
+  归档名 `file://./data.xp3`，而 EnsureSegment 探针（patch 0079
+  AdoptFromPage）先把归档名过一遍 `NormalizeInArchiveStorageName`——
+  该函数会把 `//` 折叠成 `/`，探针到达页面时是 `file:/./data.xp3`；
+  页面 normalizeArchive 只剥严格 `file://` 前缀，于是入库键
+  `data.xp3|idx|seg` 与探针键 `file:/./data.xp3|idx|seg` 永不相等，
+  预取的语音段从未被消费（真机 31 parked / 0 hit；桌面 senren 复现
+  97 parked / 0 hit）。修复：normalizeArchive 宽容剥 scheme +
+  折叠重复斜杠（纯页面修复，已部署引擎无需重建）。
+- **RC5c 音频前瞻不足（patch 0081）**：AL.QUEUE_LOOKAHEAD 250ms →
+  750ms，已排程音频可以扛过 750ms 内的主线程突发；图形缓存默认
+  128 → 160MiB（标题/菜单等重访场景保持解码态）。
+- **预取大文件闸门（play/prefetch.js）**：预测只对 ≤1MiB
+  （PREFETCH_MAX_FILE_BYTES）的存储生效，多 MiB 级 CG 跳过并计入
+  `skippedLargeFiles`——弱设备上预取不再与音频调度抢带宽/解码。
+  真机 CG 编号跳跃（P/R 不相交：预测 2054/2055 而实开 2237/2083）
+  证明编号 CG 的数字后继预测天然不可靠，只保留语音类小文件的预测。
+
+### 部署 bug（审计顺带抓出，均已修复）
+
+- `apps/web/player.js`：webp-worker URL 由 wasmUrl 后缀正则替换而来，
+  `krkrsdl2\.wasm$` 被 stamp_build_versions 追加的 `?v=hash` 破解，
+  worker 会 importScripts 引擎的 .wasm 当脚本。修复：`(\?.*)?` 容忍
+  版本参数。
+- blob worker 无法解析根相对 URL（blob: base 非层级），importScripts
+  `/engine/webp-worker.js` 直接 "invalid"。修复：prefetch.js
+  `absolutizeWorkerUrl` 按页面 URL 绝对化后再 postMessage。
+
+### 验证（tests/d5_device_regression_audit.js，engine build 711a706b）
+
+- **d3 自测游戏 PASS**：predictedOpens 9、prefetchedFiles 5、
+  segmentParkPuts 5、imageParkPuts 5、**imageParkHits 5**、
+  workerWasmDecodes 11、mainDecodes 0、decodeFailures 0。
+- **千恋万花（真游戏、真压缩 XP3）PASS**：审计从标题菜单点"新游戏"
+  （以 `sysscn/title.ks` 打开为就绪判据，开机厂标序列长于任何固定延时）
+  连点推进到数字语音（`voice/uts001_*.ogg`）：notifyOpens 353、
+  predictedOpens 6、prefetchedFiles 5、segmentParkPuts 5、
+  **segmentParkHits 1（38,315 字节语音段被 EnsureSegment 一次 memcpy
+  消费）**、workerWasmDecodes 49、mainDecodes 0、poolInflates 339、
+  decodeFailures 0、无停摆。压缩段归档的段园消费链路首次全链路闭环。
+- 审计导航备注：千恋万花语音为数字递增命名（`rok504_073.ogg`，25213
+  个三位编号条目），数字后继预测适用；精灵为 .tlg 不经 WebP 园（d3 的
+  imageParkHits 路径与真游戏互斥，段园命中以真游戏为准）。
+
+### 真机复测验收标准（下一份诊断报告应看到）
+
+- `mainDecodes === 0`、`workerWasmDecodes > 0`（RC5a）；
+- `segmentParkHits > 0` 且 `segmentParkBytes > 0`（RC5b）；
+- 有声对话期间 PERF 不再出现 avg_ms > 500 的窗口，语音不中断（RC5c）；
+- `skippedLargeFiles > 0`（大 CG 被闸门跳过属预期）。

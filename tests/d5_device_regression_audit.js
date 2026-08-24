@@ -11,23 +11,36 @@
 //        prefetchedFiles > 0 and the engine consuming a park
 //        (segmentParkHits or imageParkHits/Puts > 0).
 //   RC2  decodeFailures 281 / nativeDecodes 0  -> TBS WebView has no
-//        OffscreenCanvas inside workers, so the decode worker throws on
-//        every job and ensureWorker kept handing out the broken worker
-//        instead of falling back to decodeOnMain. Fixed with
-//        markWorkerBroken. PASS = decodeFailures <= 2 (the first failing
-//        job kills the worker) and mainDecodes > 0.
+//        OffscreenCanvas inside workers, so the decode worker threw on
+//        every job. First fixed with markWorkerBroken + decodeOnMain.
 //   RC3  40s untraced engine stall             -> the WebP decode await had
 //        no timeout and no async trace. Fixed in LoadWEBP.cpp (8s race +
 //        krkr2webAsyncTrace). PASS = no KRKR2WEB_D5_STALL error and the
 //        engine perf counters keep printing.
+//   RC5a (second field report, 20260823-132147) mainDecodes 182 -> with the
+//        worker breaker engaged, EVERY image decode landed on the page's
+//        main thread and starved the OpenAL scheduler (dialogue audio cuts).
+//        Fixed with an in-worker wasm libwebp fallback (engine/webp/
+//        WebpWorker.c -> webp-worker.js): no canvas API needed. PASS =
+//        workerWasmDecodes > 0 (forced via krkr2webWebpForceWasm) and
+//        mainDecodes === 0.
+//   RC5b (second field report) segmentParkHits 0 with 31 segments parked ->
+//        the engine's EnsureSegment park probe normalizes the archive name
+//        through NormalizeInArchiveStorageName, which collapses "//" to "/",
+//        so the probe arrived as "file:/./data.xp3" while the page stripped
+//        only a strict "file://" prefix - the park keys could never match.
+//        Reproduced on desktop (senren: 97 parked, 0 consumed) and fixed
+//        with a lenient scheme strip + slash collapse in normalizeArchive.
+//        PASS (real game only) = segmentParkHits > 0.
 //
-// Runs the d3 self-test game (its scenario loads pfbg0001..0006.webp in
-// order, exercising the full prediction -> prefetch -> park -> consume
-// chain) on the baseline variant (?engineVariant=baseline) exactly like the
-// device. The decode worker is emulated to behave like the TBS WebView by
-// intercepting decode-shaped jobs ({id, bytes, bgra}) and answering with
-// "OffscreenCanvas unavailable"; inflate jobs ({id, bytes}) still run in a
-// real worker, as they do on the device (poolInflates worked there).
+// The d3 leg runs the d3 self-test game (its scenario loads pfbg0001..0006
+// .webp in order, exercising the full prediction -> prefetch -> park ->
+// consume chain); the senren leg starts a new game from the real title menu
+// and clicks through the prologue until numeric voice lines play. Both run
+// on the baseline variant (?engineVariant=baseline) exactly like the device.
+// Decode jobs run in the real worker with krkr2webWebpForceWasm = true, so
+// the audit exercises the wasm libwebp path a TBS WebView takes; inflate
+// jobs ({id, bytes}) also run in a real worker, as on the device.
 //
 // Usage (server must be up, product rebuilt with the fixes):
 //   node tests/d5_device_regression_audit.js [base]
@@ -40,6 +53,7 @@ const { chromium } = require("playwright-core");
 
 const BASE = process.argv[2] || "https://192.168.137.1/";
 const GAME_ID = process.env.KRKR2_AUDIT_GAME || "d3-test";
+const IS_D3 = GAME_ID === "d3-test";
 const OUTPUT_DIR = path.resolve("build/d5-device-regression-audit");
 
 function check(condition, message, extra) {
@@ -96,31 +110,15 @@ async function main() {
   try {
     await context.addInitScript(function () {
       // ---- TBS WebView emulation -------------------------------------------
-      // Intercept decode-shaped worker jobs ({id, bytes, bgra}) and answer
-      // "OffscreenCanvas unavailable", exactly like a TBS WebView worker
-      // scope. Matching happens at postMessage time (not construction),
-      // because prefetch.js revokes the worker's blob URL immediately and
-      // the source cannot be re-fetched afterwards. Inflate jobs
-      // ({id, bytes}) keep running in a real worker, as on the device.
-      var RealWorker = window.Worker;
-      function TbsWorker(url, options) {
-        var real = new RealWorker(url, options);
-        var realPost = real.postMessage.bind(real);
-        real.postMessage = function (data, transfer) {
-          if (data && typeof data === "object" && "bgra" in data && "bytes" in data) {
-            setTimeout(function () {
-              if (typeof real.onmessage === "function") {
-                real.onmessage({ data: { id: data.id, error: "OffscreenCanvas unavailable" } });
-              }
-            }, 5);
-            return;
-          }
-          return realPost(data, transfer);
-        };
-        return real;
-      }
-      TbsWorker.prototype = RealWorker.prototype;
-      window.Worker = TbsWorker;
+      // Inflate jobs ({id, bytes}) keep running in a real worker, as on the
+      // device. Decode jobs ({id, bytes, bgra}) now ALSO run for real, but
+      // with krkr2webWebpForceWasm set below they decode through the wasm
+      // libwebp worker path - the exact path a TBS WebView takes, since its
+      // workers have no OffscreenCanvas. (Earlier rounds emulated the TBS
+      // worker by rejecting decode jobs outright; since the in-worker wasm
+      // fallback the real path is the faithful emulation.)
+      // Matching at postMessage time is no longer needed for decode, but the
+      // wrapper stays so inflate workers keep flowing through the pool.
     });
 
     const page = await context.newPage();
@@ -137,26 +135,28 @@ async function main() {
       var game = window.d4AppState().catalog.games.filter(function (entry) { return entry.gameId === id; })[0];
       return game && game.version;
     }, GAME_ID);
-    // wipe any previous run's KAG progress first: the d3 probe game persists
-    // its parser position (kag-progress.dat in IDBFS), and a stale save makes
-    // the engine restore STRAIGHT TO THE END, skipping the numbered-image
-    // sequence. The save manager delete is the product's own save-removal
-    // path (deleting the install alone keeps saves by design).
-    await page.getByRole("button", { name: "存档", exact: true }).click();
-    await page.waitForFunction(function () {
-      return !window.krkr2SaveManager.snapshot().busy;
-    }, null, { timeout: 20000 });
-    var staleSaves = await page.evaluate(function () {
-      return window.krkr2SaveManager.snapshot().entries.length;
-    });
-    if (staleSaves > 0) {
-      await page.locator(".save-row input[type=checkbox]").first().check();
-      await page.getByRole("button", { name: "删除选中", exact: true }).click();
-      await page.getByRole("button", { name: "再次点击确认删除", exact: true }).click();
+    // The d3 probe game persists its parser position, so a stale save makes
+    // it restore STRAIGHT TO THE END; wipe via the product's own save manager
+    // (deleting the install alone keeps saves by design). The real game needs
+    // no wipe: the audit starts a new game from the title menu, which ignores
+    // whatever saves exist.
+    if (IS_D3) {
+      await page.getByRole("button", { name: "存档", exact: true }).click();
       await page.waitForFunction(function () {
-        var snapshot = window.krkr2SaveManager.snapshot();
-        return !snapshot.busy && snapshot.entries.length === 0;
+        return !window.krkr2SaveManager.snapshot().busy;
       }, null, { timeout: 20000 });
+      var staleSaves = await page.evaluate(function () {
+        return window.krkr2SaveManager.snapshot().entries.length;
+      });
+      if (staleSaves > 0) {
+        await page.locator(".save-row input[type=checkbox]").first().check();
+        await page.getByRole("button", { name: "删除选中", exact: true }).click();
+        await page.getByRole("button", { name: "再次点击确认删除", exact: true }).click();
+        await page.waitForFunction(function () {
+          var snapshot = window.krkr2SaveManager.snapshot();
+          return !snapshot.busy && snapshot.entries.length === 0;
+        }, null, { timeout: 20000 });
+      }
     }
     await page.getByRole("button", { name: "游戏库", exact: true }).click();
     await page.locator(".game-card[data-game-id=" + JSON.stringify(GAME_ID) + "]").click();
@@ -225,6 +225,10 @@ async function main() {
     // engine ever emitted a prediction (isPrediction=true) at all
     await page.evaluate(function () {
       window.krkr2webPredictionDebug = true;  // engine-side per-open diagnosis (patch 0079)
+      // Force every image decode through the wasm libwebp worker path - the
+      // exact path a TBS WebView takes (no OffscreenCanvas in workers). On
+      // desktop the native worker path would otherwise mask it.
+      window.krkr2webWebpForceWasm = true;
       window.__predictionLog = [];
       var bridge = window.krkr2webPrefetch;
       if (!bridge) { return; }
@@ -239,22 +243,63 @@ async function main() {
       };
     });
 
-    // ---- Phase 3: click past the intro [wait]; the numbered sequence then
-    // self-advances. Poll until parks show engine consumption. ----
+    // ---- Phase 3: reach voiced dialogue and click through it. Poll until
+    // parks show engine consumption. ----
+    // d3: clicking past the intro starts the numbered pfbg sequence, which
+    // then self-advances; success = the full prediction -> prefetch -> park
+    // -> consume chain on image parks.
+    // Real game (senren-banka): wait for the title menu (the engine opens
+    // sysscn/title.ks for it; the boot splash outruns any fixed delay),
+    // start a new game from the menu, then click through the prologue until
+    // numeric voice lines play. Success = a voice segment handed over from
+    // the page park (segmentParkHits - the compressed-archive path the
+    // uncompressed d3 archive can never exercise).
     const canvas = page.locator("#canvas");
+    const canvasRect = await page.evaluate(function () {
+      var r = document.getElementById("canvas").getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    });
     let snapshot = null;
-    for (var round = 0; round < 20; round += 1) {
+    if (!IS_D3) {
+      await page.waitForFunction(function () {
+        return (window.__predictionLog || []).some(function (e) {
+          return e.name.indexOf("title") !== -1;
+        });
+      }, null, { timeout: 120000 }).catch(function () {});
+      await page.waitForTimeout(4000);
+      await page.screenshot({ path: path.join(OUTPUT_DIR, "01-baseline-title.png") });
+      const opensBefore = await page.evaluate(function () {
+        return (window.__predictionLog || []).length;
+      });
+      // 新游戏 menu item on the title screen (left column, first entry)
+      await page.mouse.click(canvasRect.x + 155, canvasRect.y + 231);
+      await page.waitForTimeout(3000);
+      let started = false;
+      for (var w = 0; w < 30 && !started; w += 1) {
+        const opens = await page.evaluate(function () {
+          return (window.__predictionLog || []).length;
+        });
+        if (opens > opensBefore + 6) { started = true; break; }
+        await page.mouse.click(canvasRect.x + canvasRect.w / 2, canvasRect.y + canvasRect.h / 2)
+          .catch(function () {});
+        await page.waitForTimeout(2000);
+      }
+      check(started, "senren: a new game never started from the title menu");
+    }
+    const maxRounds = IS_D3 ? 20 : 450;
+    for (var round = 0; round < maxRounds; round += 1) {
       await canvas.click({ position: { x: 480, y: 270 }, timeout: 10000 }).catch(function () {});
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(IS_D3 ? 1200 : 700);
       snapshot = await playerSnapshot(page);
       var finished = (snapshot.engineLog || []).some(function (line) {
         return line.indexOf("KRKR2WEB_D3_KAG_TEXT") !== -1 && line.indexOf("prefetch") !== -1;
       });
       var loopMetrics = snapshot.prefetch && snapshot.prefetch.metrics;
+      if (loopMetrics && !IS_D3 && loopMetrics.segmentParkHits > 0) { break; }
       if (finished && loopMetrics && loopMetrics.predictedOpens > 0 &&
           loopMetrics.prefetchedFiles > 0 &&
           (loopMetrics.segmentParkHits > 0 || loopMetrics.imageParkHits > 0 || loopMetrics.imageParkPuts > 0) &&
-          loopMetrics.mainDecodes > 0) {
+          loopMetrics.workerWasmDecodes > 0) {
         break;
       }
     }
@@ -273,29 +318,46 @@ async function main() {
       JSON.stringify(predDbg.concat(["--- engine tail ---"].concat(
         (snapshot.engineLog || []).slice(-40))), null, 2));
     check(metrics.notifyOpens > 0, "engine never notified the page of archive opens", metrics);
-    check(metrics.predictedOpens > 0,
-      "RC1: numeric-successor predictions never fired (predictor still extension-blind)", metrics);
-    check(metrics.prefetchedFiles > 0,
-      "RC1: predicted storages were never prefetched into the parks", metrics);
-    check(metrics.segmentParkPuts > 0 || metrics.imageParkPuts > 0,
-      "RC1: prefetch never stored segments or images in the parks", metrics);
-    check(metrics.imageParkHits > 0,
-      "RC1: engine never consumed a parked image (park probe mismatch?)", metrics);
+    if (IS_D3) {
+      // d3 self-test: tiny numbered images, full prediction -> prefetch ->
+      // park -> consume chain must work end to end.
+      check(metrics.predictedOpens > 0,
+        "RC1: numeric-successor predictions never fired (predictor still extension-blind)", metrics);
+      check(metrics.prefetchedFiles > 0,
+        "RC1: predicted storages were never prefetched into the parks", metrics);
+      check(metrics.segmentParkPuts > 0 || metrics.imageParkPuts > 0,
+        "RC1: prefetch never stored segments or images in the parks", metrics);
+      check(metrics.imageParkHits > 0,
+        "RC1: engine never consumed a parked image (park probe mismatch?)", metrics);
+    } else {
+      // real game (compressed archive): voices are the sequential storage
+      // class; their predicted segments must be handed over to the engine
+      // (the second field report showed segmentParkHits 0 with 31 parked).
+      check(metrics.predictedOpens > 0, "voice predictions never fired", metrics);
+      check(metrics.segmentParkPuts > 0, "no predicted voice segment was ever parked", metrics);
+      check(metrics.segmentParkHits > 0,
+        "RC5b: parked voice segments were never consumed (EnsureSegment park probe broken?)", metrics);
+    }
     report.phases.prefetch = { status: "pass", metrics: metrics, recentNames: snapshot.prefetch.recentNames };
 
-    // ---- Phase 4: TBS decode-worker fallback must engage early ----
-    // decodeFailures counts worker-path rejects until markWorkerBroken stops
-    // the worker (a couple of in-flight jobs may reject with it); mainDecodes
-    // proves the page-level fallback then served every later decode. The
-    // uncompressed d3-test archive exercises the image park only; segment
-    // park hits need compressed archives (the real games) and stay 0 here.
+    // ---- Phase 4: wasm worker decode (the TBS path) must serve every image ----
+    // krkr2webWebpForceWasm routes all decodes through the wasm libwebp
+    // module inside the decode worker (webp-worker.js). On the TB-X802F field
+    // device this is the only available path (no OffscreenCanvas in workers);
+    // before the wasm fallback existed those decodes hit the page's main
+    // thread 182 times per session and cut dialogue audio. PASS = the wasm
+    // worker decoded everything, decodeFailures stayed near zero, and NOTHING
+    // fell back to mainDecodes.
+    check(metrics.workerWasmDecodes > 0,
+      "RC5a: the wasm worker decoder never served a decode (module missing or worker broken)", metrics);
     check(metrics.decodeFailures <= 4,
-      "RC2: the broken decode worker kept receiving jobs instead of falling back", metrics);
-    check(metrics.mainDecodes > 0,
-      "RC2: decodeOnMain fallback never served a decode after the worker broke", metrics);
+      "RC2/RC5a: decode jobs kept failing instead of resolving via the worker", metrics);
+    check(metrics.mainDecodes === 0,
+      "RC5a: decodes leaked back onto the main thread (device would stutter)", metrics);
     report.phases.decode = {
       status: "pass",
       decodeFailures: metrics.decodeFailures,
+      workerWasmDecodes: metrics.workerWasmDecodes,
       mainDecodes: metrics.mainDecodes,
       nativeDecodes: metrics.nativeDecodes
     };

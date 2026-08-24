@@ -30,6 +30,17 @@
       factory: "instantiate_krkrsdl2_module"
     }
   };
+  // krkr2web: standalone wasm libwebp decoder next to the engine files. The
+  // decode worker (play/prefetch.js) loads it only on WebView kernels that
+  // cannot read pixels back inside workers (no OffscreenCanvas) - without it
+  // those kernels decoded every image on the main thread and cut dialogue
+  // audio (TB-X802F field report). Missing file = worker reports per-decode
+  // failure, the engine falls back to its own wasm decode, no regression.
+  // $1 keeps the build-version query (stamp_build_versions rewrites wasmUrl
+  // to krkrsdl2.wasm?v=...; a trailing-$ regex alone never matches then and
+  // the worker would importScripts the engine's .wasm as a script).
+  window.krkr2webWebpWorkerUrl =
+    ENGINE_VARIANTS.baseline.wasmUrl.replace(/krkrsdl2\.wasm(\?.*)?$/, "webp-worker.js$1");
   var storageBridge = window.krkr2StorageBridge;
   var nativeAlert = window.alert;
   var preloadPromise = null;

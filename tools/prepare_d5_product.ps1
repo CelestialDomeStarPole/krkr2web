@@ -25,6 +25,8 @@ if (-not $SkipEngineBuild) {
 foreach ($required in @(
     (Join-Path $engineOutput "krkrsdl2.js"),
     (Join-Path $engineOutput "krkrsdl2.wasm"),
+    (Join-Path $engineOutput "webp-worker.js"),
+    (Join-Path $engineOutput "webp-worker.wasm"),
     (Join-Path $d2Output "catalog.json"),
     (Join-Path $d2Output "games"),
     (Join-Path $d2Metadata "resource-map.json"),
@@ -45,6 +47,11 @@ $engineDirectory = Join-Path $staging "engine"
 New-Item -ItemType Directory -Path $engineDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $engineOutput "krkrsdl2.js") -Destination $engineDirectory -Force
 Copy-Item -LiteralPath (Join-Path $engineOutput "krkrsdl2.wasm") -Destination $engineDirectory -Force
+# krkr2web: canvas-free wasm libwebp decoder for the decode worker (WebView
+# kernels without OffscreenCanvas in workers decode here instead of the main
+# thread; see engine/webp/WebpWorker.c)
+Copy-Item -LiteralPath (Join-Path $engineOutput "webp-worker.js") -Destination $engineDirectory -Force
+Copy-Item -LiteralPath (Join-Path $engineOutput "webp-worker.wasm") -Destination $engineDirectory -Force
 Copy-Item -LiteralPath (Join-Path $d2Output "catalog.json") -Destination (Join-Path $staging "catalog.json") -Force
 Copy-Item -LiteralPath (Join-Path $d2Output "games") -Destination $staging -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $d2Metadata "resource-map.json") -Destination (Join-Path $staging "resource-map.json") -Force
