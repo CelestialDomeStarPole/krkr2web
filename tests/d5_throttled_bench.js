@@ -145,22 +145,40 @@ async function main() {
     });
     const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
 
-    // ---------- save load (读档黑屏) ----------
-    if (!SKIP_LOAD) {
-      // title menu: 新游戏 sits at (155,231) canvas-relative; 继续 is the next
-      // entry below it (menu pitch measured on screenshots)
-      const slotPick = await loadViaContinueMenu(page, rect, shot);
-      report.phases.load = slotPick;
-      await shot("after-load.png");
-      await page.waitForTimeout(3000);
+    // ---------- new game via title 新游戏 (benchmarks that way; save-load
+    // path clicks 155,231+52 / slot and never reaches a voiced scene, so
+    // voiceCount stays 0 and dialogue stalls are not measurable) ----------
+    await page.evaluate(function () {
+      window.__bench.dialogueMark = performance.now();
+    });
+    const opensBeforeNewGame = await page.evaluate(function () {
+      return (window.__predictionLog || []).length;
+    });
+    await page.mouse.click(rect.x + 155, rect.y + 231);
+    await page.waitForTimeout(3200);
+    let newGameStarted = false;
+    for (var w = 0; w < 18 && !newGameStarted; w += 1) {
+      const opens = await page.evaluate(function () {
+        return (window.__predictionLog || []).length;
+      });
+      if (opens > opensBeforeNewGame + 6) { newGameStarted = true; break; }
+      await page.mouse.click(cx, cy).catch(function () {});
+      await page.waitForTimeout(1200);
     }
+    await shot("after-newgame.png");
+    const dialogueMarkT = await page.evaluate(function () {
+      return window.__bench.dialogueMark || 0;
+    });
 
     // ---------- dialogue ----------
+    // record a staged mark so the leg can be windowed separately from boot;
+    // keep overall for legacy comparison
     if (!SKIP_DIALOGUE) {
-      report.phases.dialogue = await dialogueLeg(page, cx, cy, shot);
+      report.phases.dialogue = await dialogueLeg(page, cx, cy, shot, dialogueMarkT);
       await shot("dialogue-done.png");
     }
 
+    report.phases.newGame = { started: newGameStarted, opensBeforeNewGame: opensBeforeNewGame };
     report.phases.overall = await collectPhase(page, { name: "overall", t0: bootT0, t1: Date.now() });
     const outPath = path.join(OUT_DIR, LABEL + ".json");
     fs.writeFileSync(outPath, JSON.stringify(report, null, 2));
@@ -226,7 +244,7 @@ async function performanceNow(page) {
   return page.evaluate(function () { return performance.now(); });
 }
 
-async function dialogueLeg(page, cx, cy, shot) {
+async function dialogueLeg(page, cx, cy, shot, dialogueMarkT) {
   const rounds = [];
   for (var round = 0; round < DIALOGUE_ROUNDS; round += 1) {
     await page.evaluate(function () {
@@ -268,6 +286,9 @@ async function dialogueLeg(page, cx, cy, shot) {
     rounds.push(stat);
   }
   const all = await collectBenchWindow(page);
+  const dialogueWindow = (dialogueMarkT && dialogueMarkT > 0)
+    ? await windowStats(page, dialogueMarkT, await performanceNow(page))
+    : null;
   const voices = rounds.filter(function (r) { return r.voiceLatency !== null; });
   const spriteRounds = rounds.filter(function (r) { return r.sprites.length > 0; });
   return {
@@ -276,7 +297,8 @@ async function dialogueLeg(page, cx, cy, shot) {
     voiceStartLatencyMs: pct(voices.map(function (r) { return r.voiceLatency; })),
     voiceCount: voices.length,
     spriteSwitchRounds: spriteRounds.length,
-    windowStats: all
+    windowStats: all,
+    dialogueWindow: dialogueWindow
   };
 }
 
@@ -353,9 +375,13 @@ function summarize(report) {
   const line = (k, v) => console.log("  " + k + ": " + JSON.stringify(v));
   console.log("SUMMARY label=" + report.label + " rate=" + report.rate);
   if (p.load) { line("load.waitMs", p.load.waitMs); line("load.stats", p.load.stats); }
+  if (p.newGame) { line("newGame", p.newGame); }
   if (p.dialogue) {
     line("dialogue.voiceStartLatencyMs", p.dialogue.voiceStartLatencyMs);
+    line("dialogue.voiceCount", p.dialogue.voiceCount);
+    line("dialogue.spriteSwitchRounds", p.dialogue.spriteSwitchRounds);
     line("dialogue.windowStats", p.dialogue.windowStats);
+    if (p.dialogue.dialogueWindow) { line("dialogue.dialogueWindow", p.dialogue.dialogueWindow); }
   }
 }
 
