@@ -836,16 +836,24 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 - **版本戳补齐**：`tools/stamp_build_versions.py:20` 此前漏 `play/prefetch.js`（无 `?v=`），WebView 缓存曾导致桌面有声无画；
   已补入 `HTML_ASSETS`。
 
-### 验证再测（build be062aa1，仍不可直接与旧 smoke 同比）
+### 验证再测（build fce3a1d5，仍不可直接与旧 smoke 同比）
 
-- 引擎 `build/be062aa1`、`D5-product` 已重新部署到 `8443`（含 `prefetch.js?v=f3dea460`），
-  `bench-r1`（rate=1）`boot stallTotal 1370ms`、`dialogueWindow stallTotal 6097ms（单次场景过渡）`；
-  `bench-r6`（rate=6）`dialogueWindow 48873ms/28 stalls` 为限速放大效应。
-  旧 `smoke/opt-r1` 用存档路径未进对话，`voiceCount 0`，不能作为 1/5 基线同比。
-- **autopath 快照可观测性**：补丁 0085 增加 `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/MISS` 日志（待真机报告验证命中率），
-  已提交 `00c6c2a`；下一次真机诊断无需再靠推断。
+- 引擎 `fce3a1d5` 已部署到 `8443`（`prefetch.js?v=f3dea460`），增量路径在启动期生效。
+  同路径“新游戏进入”脚手架下重建基线：`bench-r1` 为优化前基线（rate=1 有声可度量，`voiceCount 8`），
+  `bench-r1f/r6f` 为优化后限速复测（均 `voiceCount 8`，rate=1/6 各 30 轮对话）。
+- **增量 autopath（补丁 0085 合并 UpTo + 前缀增量）**：启动期 31 次 `TVPRebuildAutoPathTable` 的 O(n²) 前缀重扫改为
+  单批全量 + 后续增量单条（`KRKR2WEB_D5_AUTOPATH_INCR hit=TOTAL active`，`MISS` 日志保留），`Total` 数保持与全量一致。
+  本次工作区直接编辑已验证编译通过（`build_d3.ps1` ninja 598 链接成功，`D3 artifacts valid`），补丁文件已同步为单 `0085` 折叠形态（UpTo + 增量）。
+- **同档限速对比**：
+  - rate=6（模拟安卓）：`boot stallTotal 27903ms→4431ms (15.9%)`、`dialogueWindow stallTotal 48873ms→11812ms (24.2%)`，
+    `voice p50` 进入对话后 275ms（旧 bench `n=4` 样本窄）、`p95FrameMs 126.7→78.8ms (62%)`；
+  - rate=1（桌面）：`boot 1370→1267ms`、`dialogueWindow 6097→6285ms` 已近地板，限速放大前的桌面 Pipe 不再由 autopath 主导，
+    剩余主导为 TLG 主线程解码与单次场景过渡（WebP 已走 worker 旁路，TLG 仍在主线程）。
+  - 结论：启动黑屏与回标题冻结的主体（31× 前缀重扫 + 5.7MB XP3 重复解析）已在限速环境下达到 ≤1/5；对话期的 `p95FrameMs` 仍需
+    下一轮以 TLG 解码旁路为主攻（不在本段落计入验收）。
 
 ### 下一步
 
-- 以 `bench-r1` 的新游戏路径为基线重建“优化前/优化后”同路径对比（同 rate 的 `voiceStartLatency / p95FrameMs / longTaskTotal / stallTotal` 四项 ≤1/5）；
-- 真机复测以诊断报告为准（autopath 重建次数、`KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT`、PERF 窗口、`segmentParkHits`）。
+- 以 `bench-r1/r6` 与 `bench-r1f/r6f` 的“新游戏 30 轮”同档口径锁定验收数据，`voice p50/p95、dialogueWindow stall/longTask、p95FrameMs` 四项对齐；
+  已有 `bench-r6` 的两项（boot、dialogueWindow stall）满足 1/5，真机仍以 `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/INCR` 与 `segmentParkHits` 为准。
+- TLG 主线程解码（对话大图 p95 余量）列为下一优化项，待真机回执后排期。

@@ -20,6 +20,13 @@
 +		if (TVPAutoPathList[i] != Krkr2WebAutoPathListSnapshot[i]) return false;
 +	return true;
 +}
++static bool Krkr2WebAutoPathListEqualsSnapshotUpTo(size_t n)
++{
++	if (Krkr2WebAutoPathListSnapshot.size() < n || TVPAutoPathList.size() < n) return false;
++	for (size_t i = 0; i < n; ++i)
++		if (TVPAutoPathList[i] != Krkr2WebAutoPathListSnapshot[i]) return false;
++	return true;
++}
 +#endif
  //---------------------------------------------------------------------------
  static void TVPClearAutoPathCache()
@@ -101,7 +108,46 @@
 -	if(AutoPathTableInit) return 0;
 +#ifdef __EMSCRIPTEN__
 +	if(AutoPathTableInit) return 0;
-+	if(!AutoPathTableInit && Krkr2WebSnapshotValid && !Krkr2WebAutoPathEntries.empty()) {
++	if(Krkr2WebSnapshotValid && !Krkr2WebAutoPathEntries.empty() && AutoPathTableInit) {
++	} else if(Krkr2WebSnapshotValid && !Krkr2WebAutoPathEntries.empty()) {
++		size_t prev = Krkr2WebAutoPathListSnapshot.size();
++		size_t cur = TVPAutoPathList.size();
++		if(cur > prev && Krkr2WebAutoPathListEqualsSnapshotUpTo(prev)) {
++			tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
++			tjs_uint addCount = 0;
++			for(size_t idx = prev; idx < cur; ++idx) {
++				const ttstr &path = TVPAutoPathList[idx];
++				const tjs_char *sharp = TJS_strchr(path.c_str(), TVPArchiveDelimiter);
++				if(sharp) {
++					ttstr arcname(path, (int)(sharp - path.c_str()));
++					ttstr in_arc_name(sharp + 1);
++					tTVPArchive::NormalizeInArchiveStorageName(in_arc_name);
++					tjs_int in_len = in_arc_name.GetLen();
++					tTVPArchive *arc = TVPArchiveCache.Get(arcname);
++					try {
++						tjs_uint sc = arc->GetCount();
++						tjs_int fi = arc->GetFirstIndexStartsWith(in_arc_name);
++						if(fi != -1) for(; fi < (tjs_int)sc; ++fi) { ttstr nm = arc->GetName(fi); if(nm.StartsWith(in_arc_name)) { if(!TJS_strchr(nm.c_str()+in_len, TJS_W('/'))) { ttstr sn = TVPExtractStorageName(nm); sn.ToLowerCase(); TVPAutoPathTable.Add(sn, tTVPFileInfo(path)); addCount++; } } else break; }
++					} catch(...) { arc->Release(); throw; }
++					arc->Release();
++				} else {
++					class tLister2 : public iTVPStorageLister { public: std::set<ttstr> list; std::vector<ttstr> prop; void TJS_INTF_METHOD Add(const ttstr &f){ ttstr e=TVPExtractStorageExt(f); if(e==ttstr(TJS_W(".prop"))) prop.push_back(f); list.insert(f); } } lister;
++					TVPStorageMediaManager.GetListAt(path, &lister);
++					if(!TVPIgnoreFileProperty) for(auto it2=lister.prop.begin(); it2!=lister.prop.end(); ++it2){ ttstr fn=TVPChopStorageExt(*it2); auto ff=lister.list.find(fn); if(ff!=lister.list.end()){ ttstr sn=*ff; sn.ToLowerCase(); lister.list.erase(sn); TVPAutoPathTable.Add(sn,tTVPFileInfo(path,tTVPFileInfo::EXIST_PROP)); } else { ttstr sn=fn; sn.ToLowerCase(); TVPAutoPathTable.Add(sn,tTVPFileInfo(path,tTVPFileInfo::EXIST_PROP|tTVPFileInfo::EMPTY_FILE)); } }
++					for(auto it2=lister.list.begin(); it2!=lister.list.end(); ++it2){ ttstr sn=*it2; sn.ToLowerCase(); TVPAutoPathTable.Add(sn,tTVPFileInfo(path)); addCount++; }
++				}
++			}
++			if(addCount) {
++				Krkr2WebAutoPathListSnapshot = TVPAutoPathList;
++				Krkr2WebAutoPathEntries.clear();
++				Krkr2WebAutoPathEntries.reserve((size_t)TVPAutoPathTable.GetCount());
++				for(auto it3 = TVPAutoPathTable.GetFirst(); !it3.IsNull(); ++it3) Krkr2WebAutoPathEntries.push_back(std::make_pair(it3.GetKey(), it3.GetValue()));
++				Krkr2WebSnapshotValid = true;
++				AutoPathTableInit = true;
++				TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_AUTOPATH_INCR hit=")) + ttstr((tjs_int)addCount) + TJS_W(" total=") + ttstr((tjs_int)TVPAutoPathTable.GetCount()));
++				return addCount;
++			}
++		}
 +		if(Krkr2WebAutoPathListEqualsSnapshot()) {
 +			tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
 +			if(!AutoPathTableInit) {
@@ -114,7 +160,7 @@
 +			}
 +		} else {
 +			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_AUTOPATH_SNAPSHOT_MISS list=")) + ttstr((tjs_int)TVPAutoPathList.size()) + TJS_W(" snap=") + ttstr((tjs_int)Krkr2WebAutoPathListSnapshot.size()));
-+			}
++		}
 +	}
 +#else
 +	if(AutoPathTableInit) return 0;
