@@ -894,3 +894,11 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
   - dialogueWindow stall 主体是一次性场景载入（rate6 stallMax 34.6–35.7s），非逐击卡顿。
 - **0087 补丁修复**：此前提交的 0087 由已打补丁工作树反推，干净导出树上无法应用（本轮重建即失败）；已从 0086 干净基线重新生成并全量重建验证（`f4998953`，产物校验通过）。
 - **真机复核**：仍缺新构建（`f4998953`）的 `KRKR2WEB_D5_AUTOPATH_SNAPSHOT_HIT/INCR` 与 `segmentParkHits` 设备样本，待下一次真机诊断上传后复核。
+
+### 真机复核：新构建 f4998953（2026-08-25 报告 20260825-033618-57e9e521）
+
+- 环境：TB-X802F X5 WebView（Chrome 89 内核）不变；`assets.verifiedBuild = f4998953`——新构建首次真机确认（上一份 083908 为旧 a6b42c58，作废）。
+- **AUTOPATH 快照证据链补齐**：FULL 全量重建仅 4 次（adult.xp3 / video.xp3 归档注册，两个引擎会话各 2 次）；`SNAPSHOT_HIT 49` 次、每次跳过 39854 项前缀扫描（合计约 195 万项字典扫描被旁路），`SNAPSHOT_MISS 0`、`INCR 0`——0085 的快照/增量路径在真机全程命中、无回退。对比旧构建报告（083908）：仅 FULL 4 次、无任何快照跳过。
+- **prefetch/解码侧**：segmentParkPuts 55 / Hits 5（1,015,113 字节改由园区供数；旧 3 次 / 104,050 字节）；imageParkPuts 44 / Hits 0（短会话内无同名二次请求，属预期而非回退）；nativeDecodes 44 / **mainDecodes 0**（图像解码持续全部离开主线程）；workerWasmDecodes 326、poolInflates 497。
+- 帧面观测：TRANS_STATS fps 中位 8（min 3）；D5_LOAD `.tlg` p50 84ms / p95 421ms（2MB PSB 子图）；D5_PERF 最差 tick 20903ms 仍集中于一次性场景载入，堆峰值 861MB（< 1GiB 上限）。
+- 结论：读档/启动侧优化的真机复核完成（SNAPSHOT_HIT 与 segmentParkHits 均在新构建上确认）；对话侧四项缺口维持终测结论，等待下一个有效旁路方案后再计入验收。
