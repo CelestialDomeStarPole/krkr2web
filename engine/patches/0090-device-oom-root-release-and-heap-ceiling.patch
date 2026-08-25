@@ -1,0 +1,104 @@
+# krkr2web: device OOM at return-to-title — release root pins on game
+# doCompact + raise the wasm heap ceiling (patch 0090).
+#
+# Diagnostic 20260825-120641-7f205fb5 (build 9d9bfd00, TB-X802F/X5):
+# 0089 worked as designed (DOCOMPACT_CLAMP 11, zero ALLOC_RETRY, zero cache
+# nukes, 53/53 unique D5_LOAD names), but the return-to-title path still
+# wedged for 41s of silence after *gobacktitle/*doload: the heap sat at
+# 809MB with the chapter-10 materialized tree pinned by the 0088 root cache,
+# and the re-materialization needs another ~350MB transiently — past the
+# 1GiB MAXIMUM_MEMORY ceiling. Pre-0089 builds only survived because the
+# doCompact cache nuke happened to free just enough. Three changes:
+#
+# 1. System.doCompact (web) now releases the 0088 materialized-root pins
+#    before the clamped compact delivery. Device trace shows every game
+#    doCompact fires at page/scene boundaries right before the next .scn
+#    load, so the label-scan/execution double-read (the 0088 win) happens
+#    strictly after the release and never re-materializes mid-load.
+# 2. MAXIMUM_MEMORY 1GiB -> 1.5GiB: covers 809MB + transient 350MB with
+#    headroom, and stays reservable if the X5 core is 32-bit.
+# 3. Graphic cache 160MiB -> 256MiB (LRU-bounded) under the new ceiling;
+#    device trace had cacheN=290 @140MB healthy, first-time expression
+#    decodes were the remaining dialogue stutter.
+--- a/external/krkrz/base/SystemIntf.cpp
++++ b/external/krkrz/base/SystemIntf.cpp
+@@ -23,6 +23,12 @@
+ #include "ScriptMgnIntf.h"
+ #include "DebugIntf.h"
+ 
++#ifdef __EMSCRIPTEN__
++// krkr2web: implemented in plugin/psbfile/PSBFile.cpp (0090). Releases the
++// materialized .root cache pins; see SystemIntf.cpp doCompact notes.
++extern "C" unsigned int Krkr2WebReleasePSBRootsForDoCompact();
++#endif
++
+ #if 0
+ extern int TVPGetOpenGLESVersion();
+ #endif
+@@ -280,6 +286,20 @@
+ 	// clear (autopath snapshot / archive hold make that cheap) while the
+ 	// decode cache survives. Allocation-failure GC (COMPACT_LEVEL_MAX from
+ 	// the allocators) stays untouched for real emergencies.
++	// Device trace (20260825-120641): the game calls doCompact() right
++	// before loading the next chapter's .scn and at every page boundary;
++	// that is exactly when the 0088 materialized-root pins (a chapter tree
++	// is 829k TJS nodes, hundreds of MB) must be dropped, otherwise the
++	// return-to-title re-materialization hits the wasm heap ceiling and
++	// the engine wedges in an allocation loop (41s silent stall). The
++	// label-scan/execution double-read always happens after this point,
++	// so releasing here cannot cost the 0088 reuse win.
++	{
++		const tjs_uint krkr2webRoots = Krkr2WebReleasePSBRootsForDoCompact();
++		if(krkr2webRoots > 0)
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PSB_ROOT_RELEASE docompact n=")) +
++				ttstr((tjs_int)krkr2webRoots));
++	}
+ 	if(level > TVP_COMPACT_LEVEL_DEACTIVATE)
+ 	{
+ 		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_DOCOMPACT_CLAMP level=")) +
+--- a/external/krkrz/plugin/psbfile/PSBFile.cpp
++++ b/external/krkrz/plugin/psbfile/PSBFile.cpp
+@@ -854,6 +854,10 @@
+         return dispatch;
+     }
+ 
++    extern "C" unsigned int Krkr2WebReleasePSBRootsForDoCompact() {
++        return PSBFile::Krkr2WebCompactReleaseRoots();
++    }
++
+     tjs_uint PSBFile::Krkr2WebCompactReleaseRoots() {
+         std::set<const PSBFile *> snapshot(Krkr2WebRootCacheOwners().begin(),
+             Krkr2WebRootCacheOwners().end());
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -337,7 +337,14 @@
+ 	-sENVIRONMENT=${KRKRSDL2_EMSCRIPTEN_ENVIRONMENT}
+ 	-sOFFSCREENCANVAS_SUPPORT=1
+ 	-sDYNAMIC_EXECUTION=0
+-	-sMAXIMUM_MEMORY=1073741824
++	# krkr2web: 1.5GiB wasm heap ceiling. 1GiB was too tight for the
++	# chapter-10 flow on the target device: return-to-title sits at ~809MB
++	# (materialized scenario tree + decode cache) and the re-materialization
++	# in *doload needs another ~350MB transiently, which wedged the engine
++	# in an allocation loop past the ceiling (41s silent stall,
++	# diagnostic 20260825-120641). 1.5GiB covers that with headroom while
++	# staying reservable even if the X5 core turns out 32-bit.
++	-sMAXIMUM_MEMORY=1610612736
+ 	-sSTACK_SIZE=1048576
+ 	-sSTACK_OVERFLOW_CHECK=0
+ 	-sMODULARIZE=1
+--- a/src/core/base/sdl2/SysInitImpl.cpp
++++ b/src/core/base/sdl2/SysInitImpl.cpp
+@@ -1531,7 +1531,11 @@
+ 	// the audio queue on low-end devices. Enable a conservative fixed-size
+ 	// cache unless -gclim requested otherwise.
+ 	if(TVPGraphicCacheSystemLimit == 0)
+-		TVPGraphicCacheSystemLimit = 160 * 1024 * 1024;
++		// krkr2web: 256MiB decode cache under the 1.5GiB heap ceiling
++		// (CMakeLists.txt). 160MiB left first-time expression/window
++		// decodes thrashing across scene changes on the device trace
++		// (cacheN=290 @140MB was still healthy; headroom is the point).
++		TVPGraphicCacheSystemLimit = 256 * 1024 * 1024;
+ 	if(TVPGetGraphicCacheLimit() == 0)
+ 		TVPSetGraphicCacheLimit(TVPGraphicCacheSystemLimit);
+ extern void Krkr2WebSetTlgAsyncEnabled(bool);
