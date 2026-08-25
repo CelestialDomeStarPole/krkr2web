@@ -1,0 +1,369 @@
+# krkr2web: web compact/cache discipline — stop the graphic cache nuke storm.
+#
+# Device evidence (20260825-051129-299b1ef5): after *gobacktitle the same
+# 2MiB window texture (psb://window_cn.pimg/11480.tlg) re-decoded 7 times in
+# ~30s with ticks averaging 424ms, and every dialogue-period expression
+# change re-decoded its sprites. Instrumented local repro showed the cache
+# table EMPTY at every miss (no LRU chops): three paths nuke the whole cache
+# on web where re-population costs 50-350ms of main-thread decode per image:
+#
+# 1. System.doCompact() (game scripts, default level MAX) now clamps to the
+#    deactivate level: storage caches still flush (autopath snapshot + XP3
+#    archive hold make that cheap), the LRU-capped 160MiB decode cache
+#    survives. Allocation-failure GC stays at MAX for real emergencies.
+# 2. PNG/JPEG/BMP save paths no longer clear the cache on web (Win9x-era GDI
+#    bitmap handle guard; save thumbnails were wiping the cache mid-play).
+# 3. Allocation-failure retries (bitmap bits / operator new / memalign) keep
+#    delivering MAX compact but now first release the 0088 materialized .root
+#    pins (scenario trees, 829k TJS nodes ≈ hundreds of MB near the 1GiB
+#    ceiling) via a PSBFile root registry — dropping our reference never
+#    breaks the game; trees the script still holds survive via its own refs.
+#
+# Telemetry: D5_LOAD gains the full search key + cache state (attributes
+# misses), D5_CACHE_CLEAR/CHOP log every nuke/eviction, D5_ALLOC_RETRY tags
+# the three retry sites, D5_DOCOMPACT_CLAMP and D5_CACHE_CLEAR_SKIPPED_*
+# mark the new web behaviors, D5_PSB_ROOT_RELEASE counts emergency releases.
+# Local A/B (return-to-title probe): window texture re-decodes 2->0, cache
+# grows monotonically (0->117 entries) instead of resetting to 0.
+--- a/external/krkrz/visual/GraphicsLoaderIntf.cpp
++++ b/external/krkrz/visual/GraphicsLoaderIntf.cpp
+@@ -793,7 +793,13 @@
+ 
+ 	try
+ 	{
++#ifdef __EMSCRIPTEN__
++		// krkr2web: same Win9x-era guard as the PNG/JPEG save paths; see
++		// LoadPNG.cpp.
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_CACHE_CLEAR_SKIPPED_savebmp"));
++#else
+ 		TVPClearGraphicCache();
++#endif
+ 
+ 		// prepare header
+ 		tjs_uint bmppitch = bmp->GetWidth() * pixelbytes;
+@@ -1420,6 +1426,11 @@
+ 		if(!i.IsNull())
+ 		{
+ 			tjs_uint size = i.GetValue().GetObjectNoAddRef()->GetSize();
++#ifdef __EMSCRIPTEN__
++			// krkr2web: attribute cache evictions during miss storms.
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_CACHE_CHOP bytes=")) +
++				ttstr((tjs_int)size) + TJS_W(" name=") + i.GetKey().Name);
++#endif
+ 			TVPGraphicCacheTotalBytes -= size;
+ 			TVPGraphicCache.ChopLast(1);
+ 		}
+@@ -1432,6 +1443,11 @@
+ //---------------------------------------------------------------------------
+ void TVPClearGraphicCache()
+ {
++#ifdef __EMSCRIPTEN__
++	TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_CACHE_CLEAR n=")) +
++		ttstr((tjs_int)TVPGraphicCache.GetCount()) + TJS_W(" mb=") +
++		ttstr((tjs_int)(TVPGraphicCacheTotalBytes / (1024 * 1024))));
++#endif
+ 	TVPGraphicCache.Clear();
+ 	TVPGraphicCacheTotalBytes = 0;
+ }
+@@ -1445,6 +1461,9 @@
+ 		if(level >= TVP_COMPACT_LEVEL_MINIMIZE)
+ 		{
+ 			// clear the font cache on application minimize
++#ifdef __EMSCRIPTEN__
++			TVPAddImportantLog(TJS_W("KRKR2WEB_D5_CACHE_CLEAR_SRC minimize"));
++#endif
+ 			TVPClearGraphicCache();
+ 		}
+ 	}
+@@ -1948,11 +1967,41 @@
+ 			const tjs_uint krkr2webLoadMs =
+ 				static_cast<tjs_uint>(TVPGetTickCount() - krkr2webLoadStart);
+ 			if(krkr2webLoadMs >= 50)
++			{
++				// krkr2web: full search key + cache state to attribute misses
++				// (key mismatch vs LRU eviction).
++				tjs_int krkr2webSameName = 0;
++				ttstr krkr2webSameKey;
++				{
++					tTVPGraphicCache::tIterator it = TVPGraphicCache.GetFirst();
++					while(!it.IsNull())
++					{
++						if(it.GetKey().Name == nname)
++						{
++							krkr2webSameName++;
++							if(krkr2webSameName <= 2)
++								krkr2webSameKey = ttstr(TJS_W("k=")) +
++									ttstr((tjs_int)it.GetKey().KeyIdx) +
++									TJS_W(",m=") + ttstr((tjs_int)it.GetKey().Mode) +
++									TJS_W(",d=") + ttstr((tjs_int)it.GetKey().DesW) +
++									TJS_W("x") + ttstr((tjs_int)it.GetKey().DesH);
++						}
++						it++;
++					}
++				}
+ 				TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_LOAD ms=")) +
+ 					ttstr((tjs_int)krkr2webLoadMs) + TJS_W(" bytes=") +
+ 					ttstr(static_cast<tjs_int>(dest->GetWidth()) *
+ 						static_cast<tjs_int>(dest->GetHeight()) * 4) +
++					TJS_W(" key=k=") + ttstr((tjs_int)keyidx) +
++					TJS_W(",m=") + ttstr((tjs_int)mode) +
++					TJS_W(",d=") + ttstr((tjs_int)desw) + TJS_W("x") + ttstr((tjs_int)desh) +
++					TJS_W(" sameN=") + ttstr(krkr2webSameName) +
++					(krkr2webSameName ? ttstr(TJS_W(" [")) + krkr2webSameKey + TJS_W("]") : ttstr()) +
++					TJS_W(" cacheN=") + ttstr((tjs_int)TVPGraphicCache.GetCount()) +
++					TJS_W(" cacheMB=") + ttstr((tjs_int)(TVPGraphicCacheTotalBytes / (1024 * 1024))) +
+ 					TJS_W(" name=") + nname);
++			}
+ 		}
+ #endif
+ 
+--- a/external/krkrz/base/SystemIntf.cpp
++++ b/external/krkrz/base/SystemIntf.cpp
+@@ -172,6 +172,9 @@
+ TJS_BEGIN_NATIVE_METHOD_DECL(/*func. name*/clearGraphicCache)
+ {
+ 	// clear graphic cache
++#ifdef __EMSCRIPTEN__
++	TVPAddImportantLog(TJS_W("KRKR2WEB_D5_CACHE_CLEAR_SRC tjs"));
++#endif
+ 	TVPClearGraphicCache();
+ 
+ 	return TJS_S_OK;
+@@ -265,6 +268,25 @@
+ 	if(numparams >= 1 && param[0]->Type() != tvtVoid)
+ 		level = (tjs_int)*param[0];
+ 
++#ifdef __EMSCRIPTEN__
++	// krkr2web: game scripts call System.doCompact() around scene changes
++	// and the return-to-title flow to release RAM. On Windows the whole
++	// graphic cache then re-populates from fast disk reads, but on the web
++	// every subsequent image costs a 50-350ms main-thread decode, which
++	// showed up as the re-decode storm after *gobacktitle and during
++	// dialogue expression switches. The cache is already LRU-capped at
++	// 160MiB by TVPSetGraphicCacheLimit, so the hygiene intent is honored
++	// by flushing only up to the deactivate level: storage caches still
++	// clear (autopath snapshot / archive hold make that cheap) while the
++	// decode cache survives. Allocation-failure GC (COMPACT_LEVEL_MAX from
++	// the allocators) stays untouched for real emergencies.
++	if(level > TVP_COMPACT_LEVEL_DEACTIVATE)
++	{
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_DOCOMPACT_CLAMP level=")) +
++			ttstr((tjs_int)level));
++		level = TVP_COMPACT_LEVEL_DEACTIVATE;
++	}
++#endif
+ 	TVPDeliverCompactEvent(level);
+ 
+ 	return TJS_S_OK;
+--- a/external/krkrz/visual/LoadPNG.cpp
++++ b/external/krkrz/visual/LoadPNG.cpp
+@@ -512,8 +512,14 @@
+ 	tTJSBinaryStream *stream = dst;
+ 
+ 	try {
++#ifdef __EMSCRIPTEN__
++		// krkr2web: this clear is a Win9x-era GDI bitmap handle guard; on
++		// the web it only wipes the decode cache right before the game
++		// re-renders (save thumbnails), forcing full re-decodes.
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_CACHE_CLEAR_SKIPPED_savepng"));
++#else
+ 		TVPClearGraphicCache();
+-
++#endif
+ 		png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING,NULL,NULL,NULL);
+ 		if( !png_ptr ) {
+ 			TVPThrowExceptionMessage( TVPPngSaveError );
+--- a/external/krkrz/visual/LoadJPEG.cpp
++++ b/external/krkrz/visual/LoadJPEG.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "tjsDictionary.h"
+ #include "ScriptMgnIntf.h"
++#include "DebugIntf.h"
+ 
+ bool TVPAcceptSaveAsJPG(void* formatdata, const ttstr & type, class iTJSDispatch2** dic )
+ {
+@@ -545,8 +546,14 @@
+ 	size_t buff_size = width*height*sizeof(tjs_uint32);
+ 	tjs_uint8* dest_buf = new tjs_uint8[buff_size];
+ 	try {
++#ifdef __EMSCRIPTEN__
++		// krkr2web: this clear is a Win9x-era GDI bitmap handle guard; on
++		// the web it only wipes the decode cache right before the game
++		// re-renders (save thumbnails), forcing full re-decodes.
++		TVPAddImportantLog(TJS_W("KRKR2WEB_D5_CACHE_CLEAR_SKIPPED_savejpeg"));
++#else
+ 		TVPClearGraphicCache();
+-
++#endif
+ 		struct jpeg_error_mgr jerr;
+ 		cinfo.err = jpeg_std_error( &jerr );
+ 		jerr.error_exit = my_error_exit;
+--- a/src/core/visual/sdl2/BitmapBitsAlloc.cpp
++++ b/src/core/visual/sdl2/BitmapBitsAlloc.cpp
+@@ -67,6 +67,11 @@
+ 	ptr = ptrorg = (tjs_uint8*)Allocator->allocate(allocbytes);
+ 	if(!ptr) {
+ 		// Do GC
++#ifdef __EMSCRIPTEN__
++		TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_ALLOC_RETRY bitmap bytes=")) +
++			ttstr((tjs_int)allocbytes) + TJS_W("x") + ttstr((tjs_int)width) +
++			TJS_W("x") + ttstr((tjs_int)height));
++#endif
+ 		TVPDeliverCompactEvent(TVP_COMPACT_LEVEL_MAX);
+ 		ptr = ptrorg = (tjs_uint8*)Allocator->allocate(allocbytes);
+ 		if(!ptr) {
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -3520,6 +3520,10 @@
+ 			break;
+ 		else
+ 		{
++#ifdef __EMSCRIPTEN__
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_ALLOC_RETRY new bytes=")) +
++				ttstr((tjs_int)size));
++#endif
+ 			TVPDeliverCompactEvent(TVP_COMPACT_LEVEL_MAX);
+ 			has_gced = true;
+ 		}
+@@ -3596,6 +3600,10 @@
+ 		}
+ 		else
+ 		{
++#ifdef __EMSCRIPTEN__
++			TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_ALLOC_RETRY memalign bytes=")) +
++				ttstr((tjs_int)size));
++#endif
+ 			TVPDeliverCompactEvent(TVP_COMPACT_LEVEL_MAX);
+ 			has_gced = true;
+ 		}
+--- a/external/krkrz/plugin/psbfile/PSBRawFile.h
++++ b/external/krkrz/plugin/psbfile/PSBRawFile.h
+@@ -3,6 +3,7 @@
+ #include <cstddef>
+ #include <cstdint>
+ #include <functional>
++#include <set>
+ #include <string>
+ #include <vector>
+ 
+@@ -90,10 +91,8 @@
+             // is deliberately no self guard.
+             // krkr2web: the materialized script root belongs to the previous
+             // contents and must not survive a content replacement.
+-            if(scriptRootDispatch_ != nullptr) {
+-                scriptRootDispatch_->Release();
+-                scriptRootDispatch_ = nullptr;
+-            }
++            // Krkr2WebReleaseScriptRoot also unregisters the instance.
++            Krkr2WebReleaseScriptRoot();
+             if(owner_ != nullptr) {
+                 owner_->Release();
+             }
+@@ -105,9 +104,7 @@
+         }
+         [[nodiscard]] PSBFile Transfer_guess();
+         ~PSBFile() {
+-            if(scriptRootDispatch_ != nullptr) {
+-                scriptRootDispatch_->Release();
+-            }
++            Krkr2WebReleaseScriptRoot();
+             if(owner_ != nullptr) {
+                 owner_->Release();
+             }
+@@ -124,7 +121,29 @@
+         [[nodiscard]] PSBRawNode GetRoot() const;
+         [[nodiscard]] PSBRawOwner *GetOwner() const { return owner_; }
+ 
++        // krkr2web: emergency-compact support. The materialized root cache
++        // below pins scenario trees (829k TJS nodes, ~350MB on the target
++        // device) for this instance's lifetime, so allocation-failure
++        // compacts release those references on demand. Dropping our
++        // reference never breaks the game: trees the script still holds
++        // survive through its own references.
++        void Krkr2WebReleaseScriptRoot() {
++            if(scriptRootDispatch_ != nullptr) {
++                scriptRootDispatch_->Release();
++                scriptRootDispatch_ = nullptr;
++                Krkr2WebRootCacheOwners().erase(this);
++            }
++        }
++        static tjs_uint Krkr2WebCompactReleaseRoots();
++
+     private:
++        // krkr2web: instances with a live materialized root. Inline
++        // function-local static: one shared set across translation units.
++        static std::set<const PSBFile *> &Krkr2WebRootCacheOwners() {
++            static std::set<const PSBFile *> owners;
++            return owners;
++        }
++
+         PSBRawOwner *owner_{};
+         // krkr2web: cached TJS materialization of this file's root. The game
+         // reads .root twice per scenario PSB (label scan + execution) and one
+--- a/external/krkrz/plugin/psbfile/PSBFile.cpp
++++ b/external/krkrz/plugin/psbfile/PSBFile.cpp
+@@ -850,7 +850,24 @@
+         dispatch->AddRef();
+         scriptRootDispatch_ = dispatch;
+         scriptRootDispatch_->AddRef();
++        Krkr2WebRootCacheOwners().insert(this);
+         return dispatch;
++    }
++
++    tjs_uint PSBFile::Krkr2WebCompactReleaseRoots() {
++        std::set<const PSBFile *> snapshot(Krkr2WebRootCacheOwners().begin(),
++            Krkr2WebRootCacheOwners().end());
++        tjs_uint released = 0;
++        for(const PSBFile *instance : snapshot) {
++            if(instance->scriptRootDispatch_ == nullptr) {
++                Krkr2WebRootCacheOwners().erase(instance);
++                continue;
++            }
++            // releasing also erases the instance from the registry
++            const_cast<PSBFile *>(instance)->Krkr2WebReleaseScriptRoot();
++            released++;
++        }
++        return released;
+     }
+ } // namespace PSB
+ 
+--- a/external/krkrz/plugin/psbfile/PSBMediaRegistry.cpp
++++ b/external/krkrz/plugin/psbfile/PSBMediaRegistry.cpp
+@@ -1,11 +1,36 @@
+ #include "PSBMediaRegistry.h"
+ 
+ #include "PSBMedia.h"
++#include "PSBRawFile.h"
+ #include "StorageIntf.h"
++#include "EventIntf.h"
++#include "MsgIntf.h"
++#include "DebugIntf.h"
++
++namespace {
++    // krkr2web: emergency compacts (allocation-failure retries, level >=
++    // MINIMIZE) free the materialized .root trees pinned by the 0088 root
++    // cache; near the 1GiB heap ceiling those pins are hundreds of MB and
++    // keep the engine in the re-allocate/re-fail loop behind the title
++    // freeze. Normal doCompact calls are clamped below this level on the
++    // web (SystemIntf.cpp), so this only fires on real pressure.
++    class Krkr2WebPSBRootCompactCallback : public tTVPCompactEventCallbackIntf {
++    public:
++        void TJS_INTF_METHOD OnCompact(tjs_int level) override {
++            if(level < TVP_COMPACT_LEVEL_MINIMIZE) return;
++            const tjs_uint released = PSB::PSBFile::Krkr2WebCompactReleaseRoots();
++            if(released > 0)
++                TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PSB_ROOT_RELEASE n=")) +
++                    ttstr((tjs_int)released));
++        }
++    };
++} // namespace
+ 
+ void initPsbFile() {
+     // Every reference guard-initializes the function-local pointer once, while
+     // still registering the same media object on every invocation.
+     static PSB::PSBMedia *psbMedia = new PSB::PSBMedia();
+     TVPRegisterStorageMedia(psbMedia);
++    static Krkr2WebPSBRootCompactCallback krkr2webCompactCallback;
++    TVPAddCompactEventHook(&krkr2webCompactCallback);
+ }

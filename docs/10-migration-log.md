@@ -970,3 +970,66 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 2. **物化本体提速**：备忘录已证仅 -8%，剩余在 TJSCreateDictionaryObject/PropSet 的 45 万次
    对象创建，需 TJS 分配器/GC 层面的方案（风险高，收益未知）。
 3. p95FrameMs（逐帧合成/上载）与语音起播提前量维持上轮排序不变。
+
+### 2026-08-25 第二轮：图形缓存核爆风暴——回标题冻结与对话重解码的公共根因（补丁 0089）
+
+用户反馈（报告 `20260825-051129-299b1ef5`）：0088 后体感无提升、场景过渡不无缝、
+回标题后卡死无法操作。
+
+#### 根因链（设备 + 本地双重实锤）
+
+- 设备：`*gobacktitle` 后同一张窗口贴图 `psb://window_cn.pimg/11480.tlg`（2MiB RGBA）
+  在 ~30s 内重解码 **7 次**，tick avg 424ms / max 8079ms，heap 794MB；对话期立绘/底图
+  D5_LOAD miss 不断。旧报告（083908/57e9e521）同样存在 23-35 次——**非 0088 回归**。
+- 本地复现（`build/tmp-titlereturn.js`，点击路径自设备 TOUCH 日志还原：
+  1920×1200 拉伸画布 → 游戏坐标 (824,607) 直达 `*gobacktitle`）+ D5_LOAD 遥测扩展
+  （完整查询键/sameN/cacheN/cacheMB）：**每次大图 miss 时 cacheN=0 且零 CACHE_CHOP**——
+  不是 LRU 淘汰，是整表被 Clear；所有 miss 的键一致（k=clNone,m=Normal,d=0x0），
+  排除键不匹配。
+- 三条清空路径（打标签归因）：**① `System.doCompact()`**（游戏脚本场景切换/回标题调用，
+  默认 level=MAX≥MINIMIZE → 图形缓存回调全清）；**② PNG/JPEG/BMP 保存路径**
+  （Win9x GDI 位图句柄遗产——存档缩略图写入即全清）；**③ 分配失败 GC**
+  （bitmap bits / operator new / posix_memalign 失败重试 → MAX compact 附带清空）。
+  Windows 上这三条几乎无代价（磁盘重解码快）；web 上每次清空后每张图要付 50-350ms
+  主线程解码。
+- 设备死循环闭环：场景载入物化 +350MB（heap 623MB）→ 漂移至 794MB → 逼近 1GiB 上限
+  大分配失败 → MAX compact 核爆缓存 → 重解码分配更多 → 更易失败（卡顿、回标题冻结）；
+  且 0088 的根缓存/六槽 MRU 把 829k 节点物化树钉在堆上，回标题游戏侧释放后堆不回落。
+
+#### 补丁 0089（web-compact-graphic-cache-discipline，85 补丁）
+
+1. **`System.doCompact` web 钳位到 DEACTIVATE**：存储缓存照清（autopath 快照/归档持有
+   兜底，~0.3ms），LRU 封顶 160MiB 的解码缓存存活；分配失败 GC 的 MAX 不受影响
+   （真应急仍全清）。遥测 `D5_DOCOMPACT_CLAMP`。
+2. **存图路径 web 跳过清空**（savepng/savejpeg/savebmp），遥测 `D5_CACHE_CLEAR_SKIPPED_*`。
+3. **应急档先释放 0088 物化树引用**：PSBFile 物化实例注册表 + compact 钩子，
+   level≥MINIMIZE 时释放 `scriptRootDispatch_`（数百 MB；游戏自持引用的树不受影响，
+   下次 `.root` 读按需重物化）。遥测 `D5_PSB_ROOT_RELEASE`。
+4. 遥测：D5_LOAD 全键+缓存水位、`D5_CACHE_CLEAR/CHOP`、`D5_ALLOC_RETRY`（bitmap/new/memalign）。
+
+#### 本地 A/B（修复前 ret-a~d vs 修复后 ret-e~h，含干净重导出终验）
+
+- 修复前：回标题窗口贴图重解码 1-2 次、cacheN 反复归零、可见 minimize 标签清空。
+- 修复后：**零 CACHE_CLEAR/ALLOC_RETRY；miss 列表每名字至多一次（每会话至多解码一次）；
+  cacheN 单调增长 0→117**；window11480 回标题全程缓存命中。
+- bench 参照（fix-r1/r6）：rate1 stallTotal 2988（平台期 3642-4109）、voice p50 204；
+  rate6 voice p50 603——均在平台期噪声带内（本地堆压不到 1GiB，无分配失败风暴，
+  **收益主体在设备端**）。
+- 干净树验证：`apply_patch --check` 通过（krkrz 子模块文件为 CRLF，补丁上下文已按
+  CRLF 生成）；`build_d3.ps1` 全量重导出+85 补丁+编译通过（构建 `9d9bfd00`），
+  产物契约校验（无 SAB/JSPI/Wasm EH/SIMD，Asyncify 开启）。
+
+#### 画面上下颠倒事件（本轮插曲）
+
+用户桌面浏览器画面颠倒：443 服务端在两次 `prepare_d5_product` 期间未重启——磁盘引擎
+文件已换新、内存 resource-map 仍旧、浏览器再叠一层缓存，新旧引擎文件混装（worker
+合成与 wasm 行序协议不一致即可翻转）。本地干净加载两代构建（fcf81587/dec529f4）截图
+方向校验均正立（对话窗亮带在底部），重启 443 + 硬刷新即愈。AGENTS.md"prepare 后必须
+重启服务端"条款即为此类情形，本轮实际踩中一次。
+
+#### 待真机复核（设备重测清单）
+
+- 诊断报告应出现 `D5_DOCOMPACT_CLAMP`/`D5_CACHE_CLEAR_SKIPPED_*`；若仍有堆压力则见
+  `D5_ALLOC_RETRY` + `D5_PSB_ROOT_RELEASE`（应急链工作证据）。
+- `*gobacktitle` 后 D5_LOAD 同名重解码消失、heap 曲线在回标题后回落（根缓存引用释放）。
+- 体感：场景过渡流畅度、回标题不再冻结。
