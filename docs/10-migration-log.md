@@ -902,3 +902,8 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 - **prefetch/解码侧**：segmentParkPuts 55 / Hits 5（1,015,113 字节改由园区供数；旧 3 次 / 104,050 字节）；imageParkPuts 44 / Hits 0（短会话内无同名二次请求，属预期而非回退）；nativeDecodes 44 / **mainDecodes 0**（图像解码持续全部离开主线程）；workerWasmDecodes 326、poolInflates 497。
 - 帧面观测：TRANS_STATS fps 中位 8（min 3）；D5_LOAD `.tlg` p50 84ms / p95 421ms（2MB PSB 子图）；D5_PERF 最差 tick 20903ms 仍集中于一次性场景载入，堆峰值 861MB（< 1GiB 上限）。
 - 结论：读档/启动侧优化的真机复核完成（SNAPSHOT_HIT 与 segmentParkHits 均在新构建上确认）；对话侧四项缺口维持终测结论，等待下一个有效旁路方案后再计入验收。
+
+### 阶段性收尾（2026-08-25）
+
+- 本轮（读档黑屏 / 对话音频与切换卡顿）到此收尾：读档/启动侧 1/5 达标并经真机复核（见 09 验证记录 2026-08-24/25 条目）；对话侧四项判定平台期，同类旁路（更大预取、更密让步、解码扩容）已证伪并回退，重启优化需先提出新构成假设。
+- 仓库约定沉淀至根目录 AGENTS.md（实机服务端固定 192.168.137.1:443、补丁纪律、WSL 同步与发布规则）；WSL 同步目标勘误为 ~/krkr2web（/mnt/d 为同一仓库挂载，误用会自我冲突）。
