@@ -43,7 +43,7 @@
 +				Krkr2WebTlgMaybeYield((int)yy);
  				prevline = curline;
  			}
- 		}
+ 
 --- a/src/core/base/sdl2/SysInitImpl.cpp
 +++ b/src/core/base/sdl2/SysInitImpl.cpp
 @@ -1534,7 +1534,19 @@
