@@ -907,3 +907,66 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 
 - 本轮（读档黑屏 / 对话音频与切换卡顿）到此收尾：读档/启动侧 1/5 达标并经真机复核（见 09 验证记录 2026-08-24/25 条目）；对话侧四项判定平台期，同类旁路（更大预取、更密让步、解码扩容）已证伪并回退，重启优化需先提出新构成假设。
 - 仓库约定沉淀至根目录 AGENTS.md（实机服务端固定 192.168.137.1:443、补丁纪律、WSL 同步与发布规则）；WSL 同步目标勘误为 ~/krkr2web（/mnt/d 为同一仓库挂载，误用会自我冲突）。
+
+## 2026-08-25 场景载入大 tick 归因与修复（PSB 物化双重执行，补丁 0088）
+
+上一轮收尾后的新构成假设验证：对话侧平台期的主项 `dialogueWindow stallMax`（rate6 34.6-35.7s）
+与真机最差 tick 20.9s 同源，即新游戏进场的一次性场景载入单 tick。
+
+### 取证方法（新探针）
+
+`build/tmp-scene-trace.js`（gitignored，思路：d5_throttled_bench 的新游戏路径 + 页内 200ms 轮询
+`d4PlayerState().engineLog` 环形缓冲并给新行盖 performance.now 戳 + rAF gap 对齐）。关键读数修正：
+引擎 tick 阻塞事件循环时**一切日志都在 tick 结束后才被轮询到**，判读时必须按行内 ms 值归位，
+不能按时间戳。
+
+### 根因（全部实锤，trace 三轮复现）
+
+- **37.7s 大 tick 的 74% 是剧本 PSB 的 `.root` 双重物化**：`new PSBFile("…/001・アーサー王ver1.07.ks.scn")`
+  （2.5MB，Yuzusoft 编译剧本本体是 PSB 容器）→ 游戏在同一实例上读两次 `.root`（标签扫描 + 执行），
+  而 0069 的 `GetScriptRootDispatch` 是 Property，**每次读都全量重建 TJS 对象树**：
+  `PSB_MAT ms=13244` + `ms=14881`（rate6；单次 ≈2.3s 桌面真实）。
+  节点计数 451,769（键名仅 1,478 个唯一值）。
+- **PSBMedia 容器缓存只有单槽**：psb:// 子图读取在 window_cn/chapter/voicebar/quickmenu/title/langselect
+  间交替时每次整容器重解析（`PSB_SWITCH` 11 次/会话，真机冷档最高 360ms/次）。
+- 修复前后对照确认**不是**：图像解码（tick 内 D5_LOAD 合计仅 ~1-2s 且 mainDecodes=0）、
+  PSB 容器读盘（37ms）、autopath（快照全程命中）。
+
+### 补丁 0088（psb-container-and-root-caches）
+
+1. **PSBFile 实例级物化根缓存**：`scriptRootDispatch_`（mutable 成员）缓存物化结果，
+   `.root` 二次读直接复用；owner 替换（operator=/Adopt/Transfer）时失效。refcount：返回引用 +1、
+   缓存持有 +1。
+2. **物化备忘录**：`MaterializeContext` 按名字索引缓存 ttstr（1,478 键）、按字符串指针缓存
+   tTJSVariant（3,891 串），消灭 45 万节点的重复 UTF-8→TJS 转换与分配。实测 13.55→12.45s（-8%，
+   瓶颈确证在 TJS 对象创建本身而非解码）。
+3. **PSBMedia 六槽 MRU**：`ContainerSlot{container, file}` 数组，命中移首，满 6 逐出；
+   `Resolve` 读首槽并加空调度守卫。
+4. 遥测：`KRKR2WEB_D5_PSB_LOAD ms= bytes= name=`（每容器载入）、
+   `KRKR2WEB_D5_PSB_MAT ms= nodes=`（≥20ms 的物化）。
+- 登记于 upstream.json（84 补丁）；`-Clean` 全量重建从零应用通过（构建 `bc13d6e6`），
+  干净基线（导入 + AsNarrowStdString + 0069）上 `apply_patch --check` 通过且应用后与工作树逐字节一致。
+
+### 验证（pre = f4998953 的 post-r1/r6，post = opt2-r1/r6，同 30 轮新游戏路径）
+
+| 指标 | rate6 pre→post | rate1 pre→post |
+| --- | --- | --- |
+| dialogueWindow stallMax | 34582→12250（**35%**） | 3752→1285（**34%**） |
+| dialogueWindow stallTotal | 44617→23287（**52%**） | 3752→1285（34%） |
+| dialogueWindow longTask | 63790→43026（67%） | 19484→17214（88%） |
+| p95FrameMs | 121.2→127.3（105%，噪声） | 54.46→54.51（100%，节拍地板） |
+| voice p50/p95 | 737/842→538/895（小样本噪声） | 156/240→211/220（同左） |
+
+- trace 复核：大 tick 37.7→16.2s（PSB_MAT 仅 1 次）、stallMax 35.3→12.0s；
+  渲染与基线截图一致（降采样色彩分布相同）。
+- 判定：对话侧 stall 首次显著突破平台期（此前三轮同类尝试 95-103%）；未到 1/5——剩余构成为
+  单次物化本体（12.4s rate6，TJS 对象创建主导）+ ~4s TJS 剧本处理。
+- boot 侧（XP3 挂载主导）rate6 108%/rate1 94%，噪声带内。
+
+### 下一步候选（按证据排序）
+
+1. **跨实例剧本缓存**（名字键 LRU 持有物化树）：读档回章节/章节重进免物化；需先补
+   save/load 验证腿（当前 bench 只走新游戏）并评估游戏侧是否变异树。
+2. **物化本体提速**：备忘录已证仅 -8%，剩余在 TJSCreateDictionaryObject/PropSet 的 45 万次
+   对象创建，需 TJS 分配器/GC 层面的方案（风险高，收益未知）。
+3. p95FrameMs（逐帧合成/上载）与语音起播提前量维持上轮排序不变。

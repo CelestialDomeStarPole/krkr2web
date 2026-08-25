@@ -1,0 +1,327 @@
+# krkr2web: PSB load/materialization cost fixes (patch 0088).
+#
+# Evidence (throttled new-game trace, rate=6, build before this patch):
+# the 35s scene-load tick was 74% PSBFile.root materialization of the
+# 2.5MB scenario .scn - read TWICE on one instance (label scan + execution,
+# 13.2s + 14.9s). psb:// subimage opens also forced full PSB container
+# re-parses because PSBMedia kept exactly one container.
+#
+# - PSBFile: cache the materialized script root per instance (.root now
+#   materializes once per load; cleared whenever the owner contents are
+#   replaced). Per-materialization name/string memo tables cut redundant
+#   UTF-8->TJS re-decodes (451,769 nodes share 1,478 distinct keys).
+# - PSBMedia: six-slot MRU container cache instead of one, so interleaved
+#   window/chapter/voicebar/quickmenu subimage reads stop re-parsing whole
+#   containers.
+# - Telemetry: KRKR2WEB_D5_PSB_LOAD per container load, KRKR2WEB_D5_PSB_MAT
+#   for materializations >=20ms (with node count).
+diff --git a/external/krkrz/plugin/psbfile/PSBFile.cpp b/external/krkrz/plugin/psbfile/PSBFile.cpp
+index a05a646..32b4dcc 100644
+--- a/external/krkrz/plugin/psbfile/PSBFile.cpp
++++ b/external/krkrz/plugin/psbfile/PSBFile.cpp
+@@ -3,8 +3,11 @@
+ #include <cstring>
+ #include <string>
+ 
++#include <unordered_map>
++
+ #include "CharacterSet.h"
+ #include "MsgIntf.h"
++#include "TickCount.h"
+ #include "PSBMediaRegistry.h"
+ #include "PSBDispatch.h"
+ #include "PSBPackedInternal.h"
+@@ -32,8 +35,20 @@ namespace PSB {
+             return ttstr(value);
+         }
+ 
++        // krkr2web: per-materialization memo tables. A scenario PSB holds
++        // hundreds of thousands of dictionary entries that reuse a few
++        // thousand distinct names and strings; re-decoding and re-allocating
++        // per occurrence dominated the materialization wall time.
++        struct MaterializeContext {
++            std::vector<ttstr> names;
++            std::unordered_map<const char *, tTJSVariant> strings;
++            std::uint64_t nodes = 0;
++        };
++
+         tTJSVariant materializeScriptValue(const PSBFile &file,
+-                                            const std::uint8_t *node) {
++                                            const std::uint8_t *node,
++                                            MaterializeContext &context) {
++            ++context.nodes;
+             switch(detail::GetTypeCategory_guess(node[0])) {
+                 case 0:
+                     return tTJSVariant();
+@@ -53,8 +68,16 @@ namespace PSB {
+                 case 4: {
+                     const PSBRawNode value(file, node);
+                     const char *text = value.GetString();
+-                    return text ? tTJSVariant(utf8ToTjs(text))
+-                                : tTJSVariant();
++                    if(text == nullptr) {
++                        return tTJSVariant();
++                    }
++                    const auto memo = context.strings.find(text);
++                    if(memo != context.strings.end()) {
++                        return memo->second;
++                    }
++                    tTJSVariant decoded(utf8ToTjs(text));
++                    context.strings.emplace(text, decoded);
++                    return decoded;
+                 }
+                 case 5: {
+                     const PSBRawNode value(file, node);
+@@ -72,7 +95,7 @@ namespace PSB {
+                         for(std::uint32_t index = 0;
+                             index < offsets.nElementCount; ++index) {
+                             tTJSVariant value = materializeScriptValue(
+-                                file, values + offsets[index]);
++                                file, values + offsets[index], context);
+                             array->PropSetByNum(
+                                 TJS_MEMBERENSURE,
+                                 static_cast<tjs_int>(index), &value, array);
+@@ -94,14 +117,21 @@ namespace PSB {
+                             packed + keys.nBytes);
+                         const std::uint8_t *values = packed + keys.nBytes +
+                             offsets.nBytes;
+-                        std::string key;
+                         for(std::uint32_t index = 0;
+                             index < keys.nElementCount; ++index) {
+-                            detail::DecodeName_guess(
+-                                key, file.GetOwner(), keys[index]);
+-                            const ttstr member = utf8ToTjs(key);
++                            ttstr member;
++                            if(context.names.size() <= keys[index]) {
++                                context.names.resize(keys[index] + 1);
++                            }
++                            if(context.names[keys[index]].IsEmpty()) {
++                                std::string key;
++                                detail::DecodeName_guess(
++                                    key, file.GetOwner(), keys[index]);
++                                context.names[keys[index]] = utf8ToTjs(key);
++                            }
++                            member = context.names[keys[index]];
+                             tTJSVariant value = materializeScriptValue(
+-                                file, values + offsets[index]);
++                                file, values + offsets[index], context);
+                             dictionary->PropSet(
+                                 TJS_MEMBERENSURE, member.c_str(), nullptr,
+                                 &value, dictionary);
+@@ -789,17 +819,37 @@ namespace PSB {
+     }
+ 
+     iTJSDispatch2 *PSBFile::GetScriptRootDispatch() const {
++        // krkr2web: serve the cached materialization when .root is read
++        // again on the same contents. The scenario loader reads .root twice
++        // per PSB (label scan + execution); each full materialization of a
++        // 2.5MB scenario PSB costs 2+ seconds on the target WebView.
++        if(scriptRootDispatch_ != nullptr) {
++            scriptRootDispatch_->AddRef();
++            return scriptRootDispatch_;
++        }
+         PSBRawOwner *owner = GetOwner();
+         if(owner == nullptr) {
+             return nullptr;
+         }
++        const tjs_uint64 krkr2webMatT0 = TVPGetTickCount();
++        MaterializeContext context;
+         tTJSVariant root = materializeScriptValue(
+-            *this, owner->GetHeader()->entries);
++            *this, owner->GetHeader()->entries, context);
++        {
++            const tjs_uint krkr2webMatMs =
++                static_cast<tjs_uint>(TVPGetTickCount() - krkr2webMatT0);
++            if(krkr2webMatMs >= 20)
++                TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PSB_MAT ms=")) +
++                    ttstr((tjs_int)krkr2webMatMs) + TJS_W(" nodes=") +
++                    ttstr((tjs_int)context.nodes));
++        }
+         if(root.Type() != tvtObject || !root.AsObjectNoAddRef()) {
+             return nullptr;
+         }
+         iTJSDispatch2 *dispatch = root.AsObjectNoAddRef();
+         dispatch->AddRef();
++        scriptRootDispatch_ = dispatch;
++        scriptRootDispatch_->AddRef();
+         return dispatch;
+     }
+ } // namespace PSB
+diff --git a/external/krkrz/plugin/psbfile/PSBRawFile.cpp b/external/krkrz/plugin/psbfile/PSBRawFile.cpp
+index b15545d..7bf59e7 100644
+--- a/external/krkrz/plugin/psbfile/PSBRawFile.cpp
++++ b/external/krkrz/plugin/psbfile/PSBRawFile.cpp
+@@ -8,8 +8,10 @@
+ 
+ #include <zlib.h>
+ 
++#include "DebugIntf.h"
+ #include "MsgIntf.h"
+ #include "StorageIntf.h"
++#include "TickCount.h"
+ #include "tjsUtils.h"
+ 
+ namespace PSB {
+@@ -485,6 +487,7 @@ namespace PSB {
+         // In every reference a successful MDF decode replaces and frees the
+         // source allocation; a rejected decode keeps the source as the PSB
+         // candidate.
++        const tjs_uint64 krkr2webPsbT0 = TVPGetTickCount();
+         std::unique_ptr<TJS::tTJSBinaryStream> stream(
+             TVPCreateStream(TVPGetPlacedPath(name), TJS_BS_READ));
+         if(stream == nullptr || stream->GetSize() < 9) {
+@@ -511,7 +514,13 @@ namespace PSB {
+         // All four storage paths also leave data allocated when Adopt rejects
+         // it; preserve that boundary leak rather than folding it into the
+         // octet cleanup path.
+-        return Adopt(data, dataSize, filter);
++        const bool krkr2webPsbOk = Adopt(data, dataSize, filter);
++        // krkr2web: container load telemetry (rare, one line per PSB open).
++        TVPAddImportantLog(ttstr(TJS_W("KRKR2WEB_D5_PSB_LOAD ms=")) +
++            ttstr((tjs_int)(TVPGetTickCount() - krkr2webPsbT0)) +
++            TJS_W(" bytes=") + ttstr((tjs_int)dataSize) +
++            TJS_W(" name=") + name);
++        return krkr2webPsbOk;
+     }
+ 
+     bool PSBFile::Adopt(std::uint8_t *data, std::size_t size,
+diff --git a/external/krkrz/plugin/psbfile/PSBRawFile.h b/external/krkrz/plugin/psbfile/PSBRawFile.h
+index e926677..c9121ba 100644
+--- a/external/krkrz/plugin/psbfile/PSBRawFile.h
++++ b/external/krkrz/plugin/psbfile/PSBRawFile.h
+@@ -88,6 +88,12 @@ namespace PSB {
+             // The four non-throwing dictionary hit paths and retained iOS
+             // holder helpers share this release-old/copy/AddRef order. There
+             // is deliberately no self guard.
++            // krkr2web: the materialized script root belongs to the previous
++            // contents and must not survive a content replacement.
++            if(scriptRootDispatch_ != nullptr) {
++                scriptRootDispatch_->Release();
++                scriptRootDispatch_ = nullptr;
++            }
+             if(owner_ != nullptr) {
+                 owner_->Release();
+             }
+@@ -99,6 +105,9 @@ namespace PSB {
+         }
+         [[nodiscard]] PSBFile Transfer_guess();
+         ~PSBFile() {
++            if(scriptRootDispatch_ != nullptr) {
++                scriptRootDispatch_->Release();
++            }
+             if(owner_ != nullptr) {
+                 owner_->Release();
+             }
+@@ -117,6 +126,12 @@ namespace PSB {
+ 
+     private:
+         PSBRawOwner *owner_{};
++        // krkr2web: cached TJS materialization of this file's root. The game
++        // reads .root twice per scenario PSB (label scan + execution) and one
++        // materialization of a 2.5MB scenario costs 2+ seconds on the target
++        // WebView, so the second read must reuse the first tree. The cache is
++        // keyed to this owner's contents: every owner replacement clears it.
++        mutable iTJSDispatch2 *scriptRootDispatch_{};
+     };
+ 
+     // Raw node is a PSBFile holder subobject followed by an independent node
+diff --git a/external/krkrz/plugin/psbfile/PSBMedia.cpp b/external/krkrz/plugin/psbfile/PSBMedia.cpp
+index cf7bc18..2c16577 100644
+--- a/external/krkrz/plugin/psbfile/PSBMedia.cpp
++++ b/external/krkrz/plugin/psbfile/PSBMedia.cpp
+@@ -18,14 +18,23 @@ namespace PSB {
+ 
+     bool PSBMedia::EnsureContainer(const ttstr &name) {
+         // All four references preserve the same container-name commit and
+-        // adaptor-failure behavior below.
++        // adaptor-failure behavior below. krkr2web keeps several committed
++        // containers in an MRU list instead of exactly one.
+         const tjs_int slash = name.IndexOf(TJS_W('/'));
+         if(slash < 0) {
+             return false;
+         }
+         const ttstr container = name.SubString(0, slash);
+-        if(_file.Type() == tvtObject && _container == container) {
+-            return true;
++        for(std::size_t index = 0; index < _slots.size(); ++index) {
++            if(_slots[index].container == container) {
++                if(index != 0) {
++                    const ContainerSlot slot = _slots[index];
++                    _slots.erase(_slots.begin() +
++                        static_cast<std::ptrdiff_t>(index));
++                    _slots.insert(_slots.begin(), slot);
++                }
++                return true;
++            }
+         }
+ 
+         auto *file = new PSBFile();
+@@ -45,18 +54,33 @@ namespace PSB {
+             // Every target leaves the native holder unclaimed when the class
+             // object cannot create an adaptor; nextFile stays void. The
+             // container name is nevertheless committed and the call succeeds.
+-            _file = nextFile;
++            ContainerSlot slot;
++            slot.container = container;
++            slot.file = nextFile;
++            _slots.insert(_slots.begin(), slot);
++            if(_slots.size() > 6) {
++                _slots.pop_back();
++            }
+         }
+-        _container = container;
+         return true;
+     }
+ 
+     bool PSBMedia::Resolve(const ttstr &name, PSBRawNode &value) {
+         // All four references preserve the same segmented traversal and defer
+-        // caller-output replacement until the successful tail.
+-        iTJSDispatch2 *dispatch = _file.AsObjectNoAddRef();
++        // caller-output replacement until the successful tail. The requested
++        // container was just committed at the front by EnsureContainer.
++        if(_slots.empty()) {
++            return false;
++        }
++        iTJSDispatch2 *dispatch = _slots.front().file.AsObjectNoAddRef();
++        if(dispatch == nullptr) {
++            return false;
++        }
+         PSBFile *file =
+             ncbInstanceAdaptor<PSBFile>::GetNativeInstance(dispatch);
++        if(file == nullptr) {
++            return false;
++        }
+         // All four bodies keep the root in a retained local node. The
+         // caller's output is not touched until the successful tail, so every
+         // missing slash or dictionary key preserves its previous value.
+diff --git a/external/krkrz/plugin/psbfile/PSBMedia.h b/external/krkrz/plugin/psbfile/PSBMedia.h
+index 051b862..6805292 100644
+--- a/external/krkrz/plugin/psbfile/PSBMedia.h
++++ b/external/krkrz/plugin/psbfile/PSBMedia.h
+@@ -1,5 +1,7 @@
+ #pragma once
+ 
++#include <vector>
++
+ #include "PSBRawFile.h"
+ #include "StorageIntf.h"
+ 
+@@ -46,8 +48,16 @@ namespace PSB {
+         [[nodiscard]] const std::uint8_t *
+         GetResourceData(const ttstr &name, std::uint32_t &size);
+ 
++        // krkr2web: small MRU cache of parsed containers. The game
++        // interleaves subimage reads across several UI PSBs (window, chapter,
++        // voicebar, quickmenu, title, language); a single retained container
++        // forced a full re-parse of the whole PSB on every switch.
++        struct ContainerSlot {
++            ttstr container;
++            tTJSVariant file;
++        };
++
+         int _ref = 0;
+-        tTJSVariant _file;
+-        ttstr _container;
++        std::vector<ContainerSlot> _slots;
+     };
+ } // namespace PSB
