@@ -81,9 +81,12 @@
   var pendingTrace = null;
   function traceStart(op, detail) {
     pendingTrace = { op: op, detail: detail || "", startedAt: Date.now() };
-    if (window.krkr2webStorageTrace !== undefined) { window.krkr2webStorageTrace = pendingTrace; }
+    // krkr2web: publish unconditionally. The old `!== undefined` guard was
+    // dead code (nothing pre-declared the property), so a storage read that
+    // hung never showed up in the player's stall-detector pending text.
+    globalThis.krkr2webStorageTrace = pendingTrace;
   }
-  function traceEnd() { pendingTrace = null; window.krkr2webStorageTrace = null; }
+  function traceEnd() { pendingTrace = null; globalThis.krkr2webStorageTrace = null; }
 
   function openDatabase() {
     return new Promise(function (resolve, reject) {

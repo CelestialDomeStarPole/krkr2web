@@ -99,7 +99,10 @@ h1 { margin: 0; font-size: 25px; }
 .player-loading-panel span { color: #aab2b8; font-size: 13px; line-height: 1.5; }
 .embedded-player[data-state="ready"] .player-loading-panel { display: none; }
 .engine-dialog { position: absolute; z-index: 9; inset: 0; display: grid; place-items: center; background: rgba(0, 0, 0, .45); }
-.engine-dialog-panel { display: grid; gap: 12px; width: min(360px, calc(100% - 48px)); padding: 18px 20px; border: 1px solid #505960; border-radius: 6px; background: rgba(20, 24, 27, .98); text-align: center; }
+/* krkr2web: clamp + scroll so a long notice (the port's boot text) cannot
+   push the answer buttons out of the clipped stage - the engine parks in
+   the dialog ask poll until a button is clicked. */
+.engine-dialog-panel { display: grid; gap: 12px; width: min(360px, calc(100% - 48px)); max-height: calc(100% - 48px); overflow-y: auto; padding: 18px 20px; border: 1px solid #505960; border-radius: 6px; background: rgba(20, 24, 27, .98); text-align: center; }
 .engine-dialog-panel strong { font-size: 15px; }
 .engine-dialog-panel span { color: #cfd6db; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
 .engine-dialog-actions { display: flex; justify-content: center; gap: 12px; }

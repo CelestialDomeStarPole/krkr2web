@@ -1,0 +1,83 @@
+--- a/src/core/base/sdl2/PluginImpl.cpp
++++ b/src/core/base/sdl2/PluginImpl.cpp
+@@ -527,6 +527,25 @@
+ 
+ #if defined(__EMSCRIPTEN__)
+ #	include <emscripten.h>
++// krkr2web (patch 0091): the poll loop below is the engine's only remaining
++// untraced, timeout-less Asyncify suspension. A dialog the player never
++// sees or answers freezes the main loop one 100ms sleep at a time - the
++// title-rebuild wedge on device showed 40s+ of total silence with no
++// pending-op hint. Publish the shared async trace for the whole wait so the
++// player's stall detector can name it, and log ask/answer to the engine
++// record. stdout printf reaches Module.print like every other KRKR2WEB tag.
++static void Krkr2WebLogDialogEvent(const char *tag, const char *text,
++	const char *caption, tjs_int flags, tjs_int answer)
++{
++	std::string t(text ? text : ""), c(caption ? caption : "");
++	for(auto &ch : t) if((unsigned char)ch < 0x20) ch = ' ';
++	for(auto &ch : c) if((unsigned char)ch < 0x20) ch = ' ';
++	if(t.size() > 80) t = t.substr(0, 80) + "...";
++	if(c.size() > 40) c = c.substr(0, 40) + "...";
++	printf("KRKR2WEB_D5_%s flags=%d caption='%s' text='%s' answer=%d\n",
++		tag, (int)flags, c.c_str(), t.c_str(), (int)answer);
++	fflush(stdout);
++}
+ tjs_int tKrkr2WebAskMessageBox::AskPage(const char *text,
+ 	const char *caption, tjs_int flags) {
+ 	const int token = EM_ASM_INT(
+@@ -537,8 +556,23 @@
+ 				UTF8ToString($1), $2) | 0;
+ 		},
+ 		text, caption, flags);
+-	if(token < 0)
++	if(token < 0) {
++		Krkr2WebLogDialogEvent("DIALOG_ASK_UNHOSTED", text, caption, flags, -1);
+ 		return -1;
++	}
++	Krkr2WebLogDialogEvent("DIALOG_ASK", text, caption, flags, -1);
++	// NB: no object literal here - a comma at brace level splits the EM_ASM
++	// macro's arguments (braces do not protect commas, parens do).
++	EM_ASM(
++		{
++			var trace = {};
++			trace.op = "dialog-ask";
++			trace.detail = (UTF8ToString($1) || "") + " / " +
++				(UTF8ToString($0) || "").slice(0, 60);
++			trace.startedAt = Date.now();
++			globalThis.krkr2webAsyncTrace = trace;
++		},
++		text, caption);
+ 	for(int i = 0; i < 1800; ++i) {  // 1800 * 100ms = 180s cap
+ 		emscripten_sleep(100);
+ 		const int polled = EM_ASM_INT(
+@@ -551,10 +585,14 @@
+ 		if(polled >= 0) {
+ 			EM_ASM(
+ 				{
++					if(globalThis.krkr2webAsyncTrace &&
++						globalThis.krkr2webAsyncTrace.op === "dialog-ask")
++						globalThis.krkr2webAsyncTrace = null;
+ 					if(window.krkr2webDialogDismiss)
+ 						window.krkr2webDialogDismiss($0);
+ 				},
+ 				token);
++			Krkr2WebLogDialogEvent("DIALOG_ANSWER", text, caption, flags, polled);
+ 			return polled;
+ 		}
+ 		if(polled == -2)
+@@ -562,10 +600,14 @@
+ 	}
+ 	EM_ASM(
+ 		{
++			if(globalThis.krkr2webAsyncTrace &&
++				globalThis.krkr2webAsyncTrace.op === "dialog-ask")
++				globalThis.krkr2webAsyncTrace = null;
+ 			if(window.krkr2webDialogDismiss)
+ 				window.krkr2webDialogDismiss($0);
+ 		},
+ 		token);
++	Krkr2WebLogDialogEvent("DIALOG_TIMEOUT", text, caption, flags, -1);
+ 	return -1;
+ }
+ #else

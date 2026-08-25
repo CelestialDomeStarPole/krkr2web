@@ -599,6 +599,19 @@
         } : null
       },
       saveSyncCount: saveSyncCount,
+      // krkr2web: discriminator state for the title-return silent wedge.
+      // engineDialogs>0 means the engine is Asyncify-parked in the dialog
+      // ask poll; rafAlive=false (while this snapshot runs from a timer)
+      // means requestAnimationFrame stopped firing - a compositor stall
+      // freezing the rAF-driven engine loop while page JS keeps running.
+      engineDialogCount: Object.keys(engineDialogs).length,
+      engineDialogTexts: Object.keys(engineDialogs).slice(0, 4).map(function (token) {
+        var node = engineDialogs[token] && engineDialogs[token].node;
+        var span = node && node.querySelector("span");
+        return { result: engineDialogs[token].result, text: span ? String(span.textContent).slice(0, 60) : "" };
+      }),
+      rafAlive: (Date.now() - rafLastBeatAt) < 3000,
+      rafSilentMs: Date.now() - rafLastBeatAt,
       launch: launchEvidence && Object.assign({}, launchEvidence),
       alerts: alerts.slice(-16),
       errors: errors.slice(-24),
@@ -1133,6 +1146,17 @@
   var engineStallSince = null;
   var engineStallSilentMs = 0;
   var stallToastTimer = 0;
+  // krkr2web: independent rAF heartbeat. The engine's main loop runs from
+  // requestAnimationFrame (emscripten_set_main_loop fps=0), so a WebView
+  // compositor stall freezes the whole engine while timers - like the
+  // watchdog below - keep firing. Distinguishes "engine suspended in an
+  // await" from "rAF itself stopped" in the on-device reports.
+  var rafLastBeatAt = Date.now();
+  var rafStallReported = false;
+  (function rafBeat() {
+    rafLastBeatAt = Date.now();
+    requestAnimationFrame(rafBeat);
+  })();
   function showStallToast(text, sticky) {
     var toast = document.getElementById("toast");
     if (!toast) { return; }
@@ -1212,7 +1236,21 @@
     stop({ sync: false, reason: "engine-quit" }).then(function () { hide(); }, function () { hide(); });
   };
   setInterval(function () {
-    if (!engineSessionActive || document.visibilityState !== "visible") { engineStallSince = null; return; }
+    if (!engineSessionActive || document.visibilityState !== "visible") { engineStallSince = null; rafStallReported = false; return; }
+    // rAF discriminator: with the page visible, requestAnimationFrame not
+    // firing for 5+ seconds while this timer runs means the compositor
+    // stalled - the rAF-driven engine loop cannot tick at all, independent
+    // of any engine-side suspension.
+    var rafSilent = Date.now() - rafLastBeatAt;
+    if (rafSilent > 5000 && !rafStallReported) {
+      rafStallReported = true;
+      errors.push("KRKR2WEB_D5_RAF_STALL requestAnimationFrame 已停跳 " + Math.round(rafSilent / 1000) +
+        " 秒（页面可见且定时器存活）→ 合成器停摆，引擎主循环无法回调");
+      notifyState();
+      persistEvidence();
+    } else if (rafSilent < 1000) {
+      rafStallReported = false;
+    }
     var silentMs = Date.now() - engineHeartbeatAt;
     if (engineHeartbeatAt > 0 && silentMs > 40000) {
       if (!engineStallSince) {
@@ -1227,6 +1265,10 @@
         if (pendingOp) {
           pendingText = "；挂起操作: " + pendingOp.op + " " + pendingOp.detail +
             " 已 " + Math.round((Date.now() - pendingOp.startedAt) / 1000) + " 秒";
+        }
+        var dialogCount = Object.keys(engineDialogs).length;
+        if (dialogCount > 0) {
+          pendingText += "；有 " + dialogCount + " 个游戏对话框正在等待点击";
         }
         errors.push("KRKR2WEB_D5_STALL 引擎主循环停跳 " + Math.round(silentMs / 1000) + " 秒（页面可见，JS 事件循环存活 → 引擎挂起等待中" + pendingText + "）");
         setStatus("游戏运行中（加载停顿）", "主循环已停跳 " + Math.round(silentMs / 1000) + " 秒，多为场景加载；游戏画面仍可点击", "ready");

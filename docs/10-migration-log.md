@@ -1076,3 +1076,48 @@ workerWasmDecodes 292`（RC5a）、`skippedLargeFiles 2`（闸门）。但用户
 补丁文件在登记后不得再改内容（哪怕只是行尾规范化）——哈希变化会让下次构建触发全量
 重导出，把工作树上未成补丁的编辑冲掉。本轮 0090 编辑因此被冲了一次后按"先拷基线→
 改→生成补丁→注册→重建"的正确顺序重做。
+
+### 2026-08-25 第四轮：回标题静默卡死收敛——判别遥测（补丁 0091）
+
+0090 设备报告 `20260825-130053-d31d6e2f`（构建 5c6af61c）：**脚本流程已全部走通**
+（`*doload` → ROOT_RELEASE n=1 → title.ks/*init → custom.ks → *title → *title_common
+→ *title_bgm 循环 ×3、BGM 解压完成、堆稳定 823MB、零 CACHE_CLEAR/ALLOC_RETRY），
+但在最后一次 `VIDEO_STOP` 后仍有 40.7s 静默（用户手动停止）。
+
+#### 逐项排除（引擎内 Asyncify 挂起点全量清点）
+
+引擎共 5 类挂起点，4 类有超时/追踪且报告显示未触发：存储读（20s 超时+metrics.errors
+为空）、XP3 解压（无超时但有 `krkr2webAsyncTrace`，停摆报警无挂起操作标注）、WEBP 解码
+（8s 超时+追踪）、TLG yield（默认关闭）。剩下唯一无追踪、无超时的：
+**`tKrkr2WebAskMessageBox::AskPage` 的 1800×100ms 对话框轮询**（补丁 0078 引入）——
+每 100ms `emscripten_sleep` 挂起引擎等玩家点按钮，最长 180s，全程无日志无追踪，
+与"页面事件循环存活、零引擎日志、零存储错误"的特征完全吻合。
+
+本地对照（ret-0091）恰好走了设备同款脚本路径（custom.ks→*title_bgm 循环→
+title_cn.pimg→langselect→*wait），**本地无卡死**——设备侧是环境性差异。两轮设备报告
+卡死点相对脚本流不同（第二轮死在第 2 次 VIDEO_STOP、第三轮死在第 3 次），时序相关而非
+确定性脚本事件 → 保留第二候选：**rAF/合成器停摆**（引擎主循环唯一驱动是
+`emscripten_set_main_loop(fps=0)`=requestAnimationFrame；X5 合成器停摆会冻结整个引擎
+而页面定时器照常触发，特征同样吻合）。
+
+另发现两处真 bug 一并修掉：`storage.js` traceStart 的 `!== undefined` 守卫是死代码
+（属性从未被预定义，存储读挂起时停摆报警永远拿不到挂起标注）；对话框面板无 max-height，
+移植公告这类长文本会把按钮挤出 `overflow:hidden` 的舞台 → 玩家点不到按钮 = 假死。
+
+#### 补丁 0091（dialog-ask-traceability，87 补丁）+ Web 判别件
+
+1. 引擎：AskPage 进入/退出打点（`D5_DIALOG_ASK/_UNHOSTED/_ANSWER/_TIMEOUT`，文本截断
+   80 字符），整个等待期间发布 `krkr2webAsyncTrace{op:"dialog-ask"}` → 现有停摆报警
+   直接点名"挂起操作: dialog-ask"。注意 EM_JS/EM_ASM 里 JS 对象字面量的花括号不保护
+   逗号（宏参数会被拆开），追踪对象用逐属性赋值构造。
+2. Web：player.js 独立 rAF 心跳 + `D5_RAF_STALL` 检测（页面可见且定时器存活但 rAF
+   停跳 >5s → 合成器停摆实锤）；快照新增 `engineDialogCount/engineDialogTexts/
+   rafAlive/rafSilentMs`；storage.js 追踪修复；对话框面板 `max-height+overflow-y:auto`。
+
+#### 验证与部署
+
+构建 `77551a72`（manifest build 号），wasm 内 4 个 DIALOG_* 字符串与 glue 内 dialog-ask
+就位；本地 ret-0091 全绿（走设备同款路径无卡死，heap 290MB 稳定）；8443/443 均已
+重启部署。下一轮真机报告即可判别：A=日志现 DIALOG_ASK/停摆标注 dialog-ask/快照
+engineDialogCount>0；B=errors 现 RAF_STALL/快照 rafAlive=false；若 CSS 修复恰好治好
+长文本对话框顶出按钮，则卡死直接消失。
