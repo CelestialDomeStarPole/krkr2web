@@ -1156,3 +1156,34 @@ unhandledrejection 捕获**——异常完全不可见（探针 app.js 与 worke
 堆 290MB 稳定）。双服务端已重启部署。下一轮真机二选一：救援生效（回标题可
 用 + 报告含 TICK_EXCEPTION 原文，按堆栈定位根治）或救援不触发（异常发生在
 非 rAF 上下文，PAGE_ERROR/PAGE_REJECTION 兜底捕获）。
+
+### 2026-08-26 阶段收口：真机完整流程验证通过（帧救援生效，残留根因立案）
+
+真机报告 `20260826-032552-3fa2c69f`（构建 77551a72 + 帧救援 Web 层）：用户确认
+**进游戏 → 回标题 → 退出游戏完整流程首次走通**，`stopReason=engine-quit`、
+`forcedStopCount=0`——三轮顽固的回标题黑屏卡死至此用户侧闭环。
+
+#### 设备证据链
+
+- 回标题脚本全通：`*doload` → ROOT_RELEASE → title.ks/*init → custom.ks 循环 →
+  `title_cn.pimg`+`langselect` 加载 → `title.ks *wait`（旧卡点全部越过）。
+- **帧救援实战生效**：`*wait` 起连续 55 个 tick 抛
+  `RuntimeError: function signature mismatch`（wasm-function[6868] ← [2584] ←
+  胶水 `ret.<computed>`，即 wasm 内 call_indirect 表签名不匹配，本机原生代码下
+  属"恰好能跑"的 C++ UB），每次被救援层拦截记录、下一帧恢复，风暴结束后引擎
+  继续运转（frameGateTicks=623）。退出流程继续推进直至引擎正常退出。
+- 退出路径残留两级 TJS 异常（非致命、未影响退出）：`showdate.tjs removeLayer`
+  与 `krkr2web-menu-shim finalize` 均 "Member \"owner\" does not exist"——
+  疑与同一 wasm 层签名错配导致的状态损伤相关；伴随一次 `D5_CACHE_CLEAR
+  n=271 mb=146`（退出 doCompact 允许档）与 A004×4。
+
+#### 立案（下一轮根治项，按优先级）
+
+1. **call_indirect 签名错配根因**：当前产物无符号表，需 `--emit-symbol-map`
+   重编一版符号化产物定位 wasm-function[6868]/[2584] 对应源码（疑点：标题
+   idle/退出路径上的某函数指针经错误类型调用，或 vtable 损伤）。救援层已把
+   它从"致命冻结"降级为"每帧可恢复"，但每个坏 tick 的残工仍被丢弃，标题
+   idle 段可能因此表现不完整。
+2. **退出流程 TJS "owner" 成员缺失**：等根因 1 落定后复核是否自愈。
+3. 立绘切换首见解码 0.1-0.3s（对话侧平台期）：既有候选（跨实例剧本缓存，
+   0088 下一步 #1）顺延。
