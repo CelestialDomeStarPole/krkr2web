@@ -1121,3 +1121,38 @@ title_cn.pimg→langselect→*wait），**本地无卡死**——设备侧是环
 重启部署。下一轮真机报告即可判别：A=日志现 DIALOG_ASK/停摆标注 dialog-ask/快照
 engineDialogCount>0；B=errors 现 RAF_STALL/快照 rafAlive=false；若 CSS 修复恰好治好
 长文本对话框顶出按钮，则卡死直接消失。
+
+### 2026-08-25 第五轮：0091 判别结果——A/B 双双排除，真凶锁定"异常杀死主循环调度器"（Web 帧救援）
+
+0091 真机报告 `20260825-152042-61766095`（构建 77551a72）：判别字段完美工作——
+`engineDialogCount=0`、零 DIALOG_ASK 日志（**候选 A 对话框轮询排除**）；零
+RAF_STALL、rAF 心跳全程存活（**候选 B 合成器停摆排除**）。但 42s 静默依旧，
+卡点仍在 VIDEO_STOP 后。两候选皆亡后重新推理：心跳停止 = process_events 不再
+返回，而事件循环与 rAF 都活着 → 引擎 tick 被"无声杀死"。
+
+**真凶（读 emscripten 3.1.64 胶水实锤）**：`Browser.mainLoop.runner` 对
+`runIter(browserIterationFunc)` **无 try/catch**，且只在回调正常返回后才调度
+下一帧。任何未捕获异常——JS 桥抛错、或 C++ 异常经 Emscripten 的 JS 异常式 EH
+（本构建 `-sDISABLE_EXCEPTION_CATCHING=0`、无 Wasm-EH）逃逸出 wasm——都会
+**永久终止主循环调度，且不触发 onAbort**：引擎冻结、无崩溃标记、rAF 与定时器
+照跑，与三轮设备报告特征完全吻合（卡点恒在 VIDEO_STOP 即引擎最后一次成功
+的 JS 调用之后）。而产品页 player.js 此前**没有 window.onerror/
+unhandledrejection 捕获**——异常完全不可见（探针 app.js 与 worker 版有，唯独
+产品页漏了）。
+
+**修复（纯 Web 层，引擎不动）**：
+
+1. **帧救援包装**：启动引擎前包一层 requestAnimationFrame——tick 抛异常时
+   记录 `D5_TICK_EXCEPTION`（含堆栈前 4 帧）入错误与引擎日志，然后重新挂起
+   runner 让下一帧从头部继续（受损 tick 的残工跳过）；连续 10 次失败才放弃
+   救援并显式报错。与引擎自身的 `__tvpRafT` 包装链兼容（救援层先装、引擎后
+   包，时戳捕获不受影响）。
+2. **未捕获异常入报告**：window.onerror / unhandledrejection → errors[] +
+   engineLog（`D5_PAGE_ERROR/_REJECTION`）。
+3. **快照补充**：`frameGateTicks/frameGateSkips`（门控通过/跳过计数，双双
+   冻结+rAF 存活=调度器死亡实锤）与救援状态。
+
+本地回归 ret-0091b：救援层透明（无 TICK_EXCEPTION、回标题走通 title_cn×2、
+堆 290MB 稳定）。双服务端已重启部署。下一轮真机二选一：救援生效（回标题可
+用 + 报告含 TICK_EXCEPTION 原文，按堆栈定位根治）或救援不触发（异常发生在
+非 rAF 上下文，PAGE_ERROR/PAGE_REJECTION 兜底捕获）。

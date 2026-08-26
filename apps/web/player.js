@@ -612,6 +612,14 @@
       }),
       rafAlive: (Date.now() - rafLastBeatAt) < 3000,
       rafSilentMs: Date.now() - rafLastBeatAt,
+      // emscripten main-loop liveness: ticks = gate passes into
+      // process_events, skips = gate-skipped rAF frames. Both frozen while
+      // rafAlive means the runner itself stopped scheduling (killed by an
+      // uncaught tick exception).
+      frameGateTicks: (window.krkr2webFrameGateTicks | 0),
+      frameGateSkips: (window.krkr2webFrameGateSkips | 0),
+      tickRescueActive: tickRescue.installed,
+      tickRescueConsecutive: tickRescue.consecutive,
       launch: launchEvidence && Object.assign({}, launchEvidence),
       alerts: alerts.slice(-16),
       errors: errors.slice(-24),
@@ -1025,6 +1033,7 @@
         }
       };
       if (audioContext) { moduleOptions.SDL2 = { audioContext: audioContext }; }
+      installEngineTickRescue();
       window.Module = moduleOptions;
       var factory = engineVariant && window[engineVariant.factory];
       if (typeof factory !== "function") { throw new Error("Selected engine factory is unavailable"); }
@@ -1157,6 +1166,46 @@
     rafLastBeatAt = Date.now();
     requestAnimationFrame(rafBeat);
   })();
+  // krkr2web: engine tick rescue. emscripten's main-loop runner calls the
+  // tick (Browser.mainLoop.runIter) without a try/catch and only schedules
+  // the next frame after the tick returns normally. Any uncaught exception
+  // - a JS throw from a bridge call, or a C++ exception escaping wasm via
+  // Emscripten's JS-based EH - therefore kills the scheduler silently: the
+  // engine freezes with no crash flags while rAF and timers keep running
+  // (the 40s+ title-return wedge signature). Wrap the engine's rAF ticks:
+  // log the exception with stack, then re-arm the runner so the next tick
+  // proceeds (the damaged tick's partial work is skipped). Ten consecutive
+  // failing ticks abort the rescue instead of hot-looping.
+  var tickRescue = { installed: false, consecutive: 0 };
+  function installEngineTickRescue() {
+    if (tickRescue.installed) { return; }
+    tickRescue.installed = true;
+    var nativeRaf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = function (callback) {
+      return nativeRaf(function (timestamp) {
+        try {
+          callback(timestamp);
+          tickRescue.consecutive = 0;
+        } catch (error) {
+          var detail = errorText(error);
+          var stack = error && error.stack ? " | " + String(error.stack).split("\n").slice(0, 4).join(" ; ") : "";
+          recordEngineLine("KRKR2WEB_D5_TICK_EXCEPTION " + detail + stack, true);
+          errors.push("KRKR2WEB_D5_TICK_EXCEPTION 引擎帧回调异常（已拦截并恢复）：" + detail);
+          persistEvidence();
+          notifyState();
+          tickRescue.consecutive += 1;
+          if (tickRescue.consecutive >= 10) {
+            errors.push("KRKR2WEB_D5_TICK_EXCEPTION 连续 " + tickRescue.consecutive + " 次，停止救援调度，引擎已停");
+            setStatus("游戏发生错误", "引擎帧连续异常：" + detail, "fail");
+            return;
+          }
+          // Re-enter through the (engine-wrapped) requestAnimationFrame so
+          // the runner restarts from its top on the next frame.
+          window.requestAnimationFrame(callback);
+        }
+      });
+    };
+  }
   function showStallToast(text, sticky) {
     var toast = document.getElementById("toast");
     if (!toast) { return; }
@@ -1174,6 +1223,27 @@
     if (stallToastTimer) { clearTimeout(stallToastTimer); stallToastTimer = 0; }
   }
   window.krkr2webEngineHeartbeat = function () { engineHeartbeatAt = Date.now(); };
+  // krkr2web: uncaught page errors into the diagnostic record. Without this,
+  // an exception escaping a rAF/promise callback is invisible in reports -
+  // the engine simply freezes with no crash flags.
+  window.addEventListener("error", function (event) {
+    if (!engineSessionActive) { return; }
+    var detail = (event.message || "未处理的页面错误") +
+      (event.filename ? " @" + event.filename + ":" + (event.lineno || 0) : "");
+    errors.push("KRKR2WEB_D5_PAGE_ERROR " + detail);
+    recordEngineLine("KRKR2WEB_D5_PAGE_ERROR " + detail, true);
+    persistEvidence();
+    notifyState();
+  });
+  window.addEventListener("unhandledrejection", function (event) {
+    if (!engineSessionActive) { return; }
+    var reason = event.reason;
+    var detail = reason && reason.message ? reason.message : String(reason);
+    errors.push("KRKR2WEB_D5_PAGE_REJECTION " + detail);
+    recordEngineLine("KRKR2WEB_D5_PAGE_REJECTION " + detail, true);
+    persistEvidence();
+    notifyState();
+  });
   // ---- engine modal dialog bridge (win32dialog shim messageBox) ----
   // The engine's krkr2webAskMessageBox (patch 0078) shows a real question
   // here instead of answering a canned IDNO, so game confirm dialogs
