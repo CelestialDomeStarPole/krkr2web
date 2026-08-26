@@ -1,0 +1,41 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -356,6 +356,11 @@
+ 	-lopenal
+ 	--bind
+ 	--no-heap-copy
++	# krkr2web: side-file wasm/JS symbol map for field diagnosis - device
++	# tracebacks arrive as wasm-function[N] indices; without the map those
++	# cannot be resolved against the shipped build (signature-mismatch
++	# traceback in 20260826-032552-3fa2c69f). Does not alter codegen.
++	--emit-symbol-map
+ 	-fPIC
+ )
+ list(APPEND KRKRSDL2_CFLAGS
+--- a/external/krkrz/external/jxrlib/image/decode/JXRTranscode.c
++++ b/external/krkrz/external/jxrlib/image/decode/JXRTranscode.c
+@@ -38,17 +38,22 @@
+ EXTERN_C Int readPackets(CWMImageStrCodec *);
+ EXTERN_C Int DecodeMacroblockDC(CWMImageStrCodec *, CCodingContext *, Int, Int);
+ EXTERN_C Int DecodeMacroblockLowpass(CWMImageStrCodec *, CCodingContext *, Int, Int);
+ EXTERN_C Int DecodeMacroblockHighpass(CWMImageStrCodec *, CCodingContext *, Int, Int);
+ EXTERN_C Void predDCACDec(CWMImageStrCodec *);
+ EXTERN_C Void predACDec(CWMImageStrCodec *);
+-EXTERN_C Void StrIODecTerm(CWMImageStrCodec *);
++/* krkr2web (patch 0092): strdec.c defines StrIODecTerm returning Int;
++ * this Void declaration made wasm-ld unify the symbol with clashing
++ * signatures ((i32)->void vs (i32)->i32), which surfaces at runtime
++ * as "call_indirect: function signature mismatch" on Chromium 89.
++ * Match the definition (strenc.c StrIOEncTerm likewise). */
++EXTERN_C Int StrIODecTerm(CWMImageStrCodec *);
+ EXTERN_C Void FreeCodingContextDec(CWMImageStrCodec *);
+ 
+ EXTERN_C Int StrEncInit(CWMImageStrCodec *);
+-EXTERN_C Void StrIOEncTerm(CWMImageStrCodec *);
++EXTERN_C Int StrIOEncTerm(CWMImageStrCodec *);
+ EXTERN_C Void FreeCodingContextEnc(CWMImageStrCodec *);
+ EXTERN_C Int  encodeMB(CWMImageStrCodec *, Int, Int);
+ EXTERN_C Int  writeIndexTableNull(CWMImageStrCodec *);
+ EXTERN_C Void writePacketHeader(BitIOInfo *, U8, U8);
+ 
+ EXTERN_C Int WriteWMIHeader(CWMImageStrCodec *);

@@ -1,0 +1,109 @@
+--- a/external/krkrz/utils/TimerThread.cpp
++++ b/external/krkrz/utils/TimerThread.cpp
+@@ -217,65 +217,99 @@
+ //---------------------------------------------------------------------------
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+ void tTVPTimerThread::InternalTrigger()
+ {
+ 	{
+ 		tjs_uint64 curtick = TVPGetTickCount() << TVP_SUBMILLI_FRAC_BITS;
+ 		{	// thread-protected
+ 			tTJSCriticalSectionHolder holder(TVPTimerCS);
+ 
+ 			bool any_triggered = false;
+ 
+ 			std::vector<tTVPTimerBase*>::iterator i;
+ 			for(i = List.begin(); i!=List.end(); i ++)
+ 			{
+ 				tTVPTimerBase * item = *i;
+ 
+ 				if(!item->GetEnabled() || item->GetInterval() == 0) continue;
+ 
+-				if(item->GetNextTick() < curtick)
++				// krkr2web (patch 0093): on the single-thread web build this
++				// pump runs once per engine tick, so curtick and every
++				// nextTick are sampled from TVPGetTickCount at tick
++				// boundaries. When a timer's interval equals the tick period
++				// (the message-window voice progress gauge uses Timer
++				// interval=50ms against the 20fps frame gate), curtick lands
++				// exactly ON nextTick each due tick; the strict `<` skips
++				// that tick, and the next tick's catch-up then computes n=2,
++				// so the timer degrades into an every-other-tick double
++				// burst and the gauge steps at half its designed cadence.
++				// The inclusive compare fires one event per interval at the
++				// exact boundary; total event count is unchanged, only the
++				// delivery becomes even. The desktop timer thread never
++				// samples at exact boundaries, so only this Emscripten pump
++				// needs the fix (TimerThread.cpp Execute() stays as-is).
++				if(item->GetNextTick() <= curtick)
+ 				{
+ 					tjs_uint n = static_cast<tjs_uint>( (curtick - item->GetNextTick()) / item->GetInterval() );
+ 					n++;
+ 					if(n > 40)
+ 					{
+ 						// too large amount of event at once; discard rest
+ 						item->Trigger(1);
+ 						any_triggered = true;
+ 						item->SetNextTick(curtick + item->GetInterval());
+ 					}
+ 					else
+ 					{
+ 						item->Trigger(n);
+ 						any_triggered = true;
+ 						item->SetNextTick(item->GetNextTick() +
+ 							n * item->GetInterval());
+ 					}
+ 				}
+ 			}
+ 
+ 			if(any_triggered)
+ 			{
+-				// triggered; post notification message to the UtilWindow
+-				if(!PendingEventsAvailable)
+-				{
+-					PendingEventsAvailable = true;
+-					EventQueue.PostEvent( NativeEvent(TVP_EV_TIMER_THREAD) );
+-				}
++				// krkr2web (patch 0093): flush synchronously. The desktop
++				// build posts TVP_EV_TIMER_THREAD to this thread's event
++				// queue and Proc runs it on the timer thread while the main
++				// thread keeps pumping, so posts and deliveries interleave
++				// densely. On the single-thread web build this pump runs
++				// once per engine tick before Application->Run, but the
++				// queued notification is only pumped AFTER the tick's
++				// idle-priority TJS delivery, so a capacity-1 timer whose
++				// interval equals the tick period posts on one tick, is
++				// delivered on the next, and capacity blocks the post in
++				// between (the voice-progress gauge visibly steps at half
++				// its cadence - measured in build/tmp-voicebar12.json:
++				// posts alternate +1/+0 per tick while fires run every
++				// tick). Firing pending events here runs before the same
++				// tick's delivery phase and restores one delivery per
++				// interval, matching desktop behavior.
++				ProcWork.reserve( Pending.size() );
++				ProcWork = Pending;
++				Pending.clear();
++				for( auto i = ProcWork.begin(); i != ProcWork.end(); i++ ) {
++					if( std::find(List.begin(), List.end(), ( *i ) ) != List.end() )
++						(*i)->FirePendingEventsAndClear();
++				}
++				ProcWork.clear();
++				PendingEventsAvailable = false;
+ 			}
+ 		}	// end-of-thread-protected
+ 	}
+ }
+ #endif
+ //---------------------------------------------------------------------------
+ void tTVPTimerThread::SetEnabled(tTVPTimerBase *item, bool enabled)
+ {
+ 	{ // thread-protected
+ 		tTJSCriticalSectionHolder holder(TVPTimerCS);
+ 
+ 		item->InternalSetEnabled(enabled);
+ 		if(enabled)
+ 		{
+ 			item->SetNextTick((TVPGetTickCount()  << TVP_SUBMILLI_FRAC_BITS) + item->GetInterval());
+ 		}
+ 		else
+ 		{

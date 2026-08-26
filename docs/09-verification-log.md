@@ -127,6 +127,18 @@
     TJS "owner" 成员缺失。详见
     [迁移开发记录](10-migration-log.md) 2026-08-26 阶段收口条目。
 
+- **2026-08-26（第二轮，引擎）签名错配根治 + 进度条节奏修复**：重编符号化
+    产物时 wasm-ld 警告直接暴露真凶——jxrlib `StrIODecTerm`/`StrIOEncTerm`
+    在 JXRTranscode.c 声明为 Void、strdec/strenc.c 定义为 Int，wasm 下两套
+    签名汇入同一符号，call_indirect 撞类型检查（与真机风暴类型一致）；声明
+    对齐后链接警告 2→0（0092 扩充，另含 --emit-symbol-map）。对话窗右下
+    音频进度条 10Hz 隔拍双根因（定时器严格 `<` 边界跳拍 + web 泵跨拍投递与
+    capacity=1 拦截）以 0093 双修复（`<=` + 同步 flush），总事件数不变、
+    设备零增量。本地回归全绿（零异常、PERF 健康），双服务端已部署构建
+    61870cf6；真机复核项：TICK_EXCEPTION 风暴消失、进度条体感、退出路径
+    "owner" 异常是否自愈。详见
+    [迁移开发记录](10-migration-log.md) 2026-08-26 第二轮条目。
+
 ## 待完成验收项
 
 1. 典型剧情 20 FPS 与 60 分钟稳定性的正式实机测量（门禁方法沿用 D3 的累计

@@ -1187,3 +1187,71 @@ unhandledrejection 捕获**——异常完全不可见（探针 app.js 与 worke
 2. **退出流程 TJS "owner" 成员缺失**：等根因 1 落定后复核是否自愈。
 3. 立绘切换首见解码 0.1-0.3s（对话侧平台期）：既有候选（跨实例剧本缓存，
    0088 下一步 #1）顺延。
+
+### 2026-08-26（第二轮）签名错配根治 + 对话进度条节奏修复（0092 扩充 / 0093）
+
+#### 主线：call_indirect 签名错配根因落定（并入 0092）
+
+真机 55 连爆 `RuntimeError: function signature mismatch`（wasm-function[6868]，
+call_indirect 类型 (i32)→i32）悬案，在 0092 重编时由 wasm-ld 链接警告直接破获：
+
+```
+wasm-ld: warning: function signature mismatch: StrIODecTerm
+>>> defined as (i32) -> void in libkrkrsdl2common.a(JXRTranscode.c.o)
+>>> defined as (i32) -> i32  in libkrkrsdl2common.a(strdec.c.o)
+wasm-ld: warning: function signature mismatch: StrIOEncTerm   （strenc.c 同）
+```
+
+jxrlib（JPEG XR 解码库）源码级声明冲突：`image/decode/JXRTranscode.c` 头部把
+`StrIODecTerm`/`StrIOEncTerm` 声明为 `EXTERN_C Void`，而定义端
+`strdec.c`/`strenc.c` 返回 `Int`。x86 上是"恰好能跑"的 C 层 UB；wasm 里两套
+签名汇入同一符号，经函数指针表 call_indirect 调用时撞类型检查——类型与真机
+风暴完全吻合。修复：JXRTranscode.c 两处声明对齐为 `Int`，链接警告 2→0。
+0092 补丁自此含两件：`--emit-symbol-map` + StrIO 声明对齐。预期真机
+TICK_EXCEPTION 风暴消失（待下一轮真机报告复核），退出路径两级 TJS
+"owner" 异常是否同源自愈一并观察。
+
+#### 附加：对话窗右下音频进度条节奏减半（0093）
+
+游戏侧机制（data.xp3 内 `main/voiceprogress.tjs` 为明文源码，直接读取）：
+进度条 `TextVoiceProgress` 由 `Timer interval=50 capacity=1 mode=atmAtIdle`
+驱动 `onTimer → updateProgress → setProgress`（按 ratio 设层宽）；位置数据链
+（openal.js `sourceTell` 连续计算 → C++ `GetCurrentPlaySamples`）实测连续无
+量化，不是根因。PC 原生恒 20Hz 更新；web 移植实测 10Hz 隔拍，两处叠加：
+
+1. **边界跳拍**：`tTVPTimerThread::InternalTrigger()`（Emscripten 单线程泵，
+   每引擎 tick 一次）以严格 `<` 判到期；当 tick 周期==interval（门控 20fps
+   × 50ms vs interval 50ms）时边界值恰好相等被跳过，下一拍补发 n=2。
+2. **跨拍投递 + capacity 拦截**：到期通知走
+   `EventQueue.PostEvent(TVP_EV_TIMER_THREAD)`，web 上该原生事件晚于本 tick
+   的 idle 优先级 TJS 投递阶段才被泵出 → 事件下一 tick 才送达；期间
+   `TVPCountEventsInQueue` 见队列非空，capacity=1 拦掉下一次 post。插桩计数
+   器实测（混叠工况，每 tick 增量）：fires +1~+3、posts 严格 +1/+0 交替、
+   idlePumps 每 tick +1——与理论逐一吻合。
+
+0093 修复（均在 InternalTrigger，桌面线程路径原样）：`<` → `<=`（边界单发）
++ 到期后同步 flush（直接 `FirePendingEventsAndClear`，先于 `Application->Run`
+   的投递阶段 → 同 tick 送达）。总事件数不变，只是把"隔拍双发/漏发"重整为
+"每拍单发"，设备端零 CPU 增量。A/B：修复前混叠工况进度条每 ~100ms 跳一步；
+修复后受限 rAF 工况正常扫动、每 tick 推进（满 rAF 混叠工况的单点复验受自动
+模式键位偶发不挂影响未捕获，机制由计数器与执行顺序构造性证明，真机体感
+待下轮报告）。
+
+#### 探针方法论突破（本地可视化测试从无效到可用）
+
+- **`page.screenshot()` 对本 WebGL 页面返回陈旧合成帧**：历史 11 轮探针的
+  32 张截图字节级完全相同（跨对话/菜单/标题状态）——此前一切本地"视觉"
+  验证实为无效。真相通道 = canvas `gl.readPixels`（探针注入
+  `preserveDrawingBuffer` init 包装）。
+- **输入映射标定**：引擎 PaintArea 为 1440×1080，游戏 1280×720 内容居中
+  偏移 (80,180)，画布位图随 CSS 缩为 1280×668；真机 CSS 按屏拉伸恰好自洽，
+  本地须按 `page = ((80+gx)·W/1440, top+(180+gy)·H/1080)` 换算。且必须用
+  `touchscreen.tap`（hasTouch）——纯鼠标事件游戏 UI 不认，这是历史本地探针
+  "交互全部失败"的根因。真机日志反推锚点：标题"继续"按钮引擎坐标
+  (187,579)、对话推进点击区 (147-259, 505-563)。
+- **资源考古**：data.xp3 内 system/*.tjs 为 TJS2100 字节码（XP3 读取复用
+  `tools/scan_xp3_compat.py`），`main/voiceprogress.tjs` 为明文；进度条部件
+  由 `uipsd/voicebar.pimg` + `_func/voicebar.func`（_waitbar 组）定义。
+- 回归：tmp-regress.js（boot→标题→新游戏→推进→10s 遥测）全绿：PERF
+  ticks 85-100/5s、零 TICK_EXCEPTION、零页面错误。双服务端已部署
+  （构建 61870cf6，8443 与 192.168.137.1:443）。

@@ -227,6 +227,8 @@
   "patches/0088-psb-container-and-root-caches.patch",
   "patches/0089-web-compact-graphic-cache-discipline.patch",
   "patches/0090-device-oom-root-release-and-heap-ceiling.patch",
-  "patches/0091-dialog-ask-traceability.patch"
+  "patches/0091-dialog-ask-traceability.patch",
+  "patches/0092-symbol-map-and-signature-mismatch-fix.patch",
+  "patches/0093-web-timer-exact-boundary-fire.patch"
  ]
 }
