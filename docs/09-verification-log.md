@@ -156,6 +156,21 @@
     待真机：① 风暴是否复现及 DIAG_STAGE 定位首个炸点；② 退出路径实感；
     ③ 本地偶发整轮超时（触点模拟层噪声嫌疑）由真机触摸复核。
 
+- **2026-08-27（第四轮，引擎）真机符号化定位 tick 风暴唯一真凶——声源悬垂注册表（0095 根治）**：
+    0094 构建真机报告 ff6e237e 回收：退出症状已根治（engine-quit 干净退库、
+    forcedStopCount=0，DRAIN_STALL 看门狗 10 次按设计接手）；但风暴仍 1330 发且
+    全部单点 `wasm-func[5445]←dynCall_v`，中途翻转为签名错配。符号化链：Python
+    直解 wasm 段表得 V8 编号=代码索引+导入数(436)、导出名锚定 yh=dynCall_v；
+    对出货二进制逐字节同构的 -g2/链接器重跑产物（未复编对象）解析 name 段，
+    炸点=`process_events_frame_gated()` 内嵌虚调用槽 +0x1c；`-Wl,-Map` 定位
+    遍历头静态=OpenALWaveMixer.cpp `TVPAudioRenderer::_streams`。根因：0082 起
+    该 unordered_set 只在 CreateStream 插入、tTVPSoundBuffer 析构从不摘除，帧门
+    每 RAF 探测 `TVPWebAudioRemainBelow→AnyStreamRemainBelow` 即对已释放对象
+    虚调用——回标题批量卸载 13 声源后首帧起确定性风暴；在 && 短路之下到期的
+    引擎 tick 仍可推进（解释日志中风暴与剧本/退出流并存）。修复=析构摘除注册
+    （TVPUnregisterAudioStream，0095 三 hunk 单文件）。净树 -Clean 重放验证
+    可应用、输出与工作树一致；本机回归 pass=2/4、干净退库 725ms 与基线持平。
+    待真机：风暴应归零、进游戏后声音持续、回标题 BGM 正常。
 ## 待完成验收项
 
 1. 典型剧情 20 FPS 与 60 分钟稳定性的正式实机测量（门禁方法沿用 D3 的累计

@@ -1,0 +1,45 @@
+--- a/src/core/sound/sdl2/OpenALWaveMixer.cpp
++++ b/src/core/sound/sdl2/OpenALWaveMixer.cpp
+@@ -11,6 +11,10 @@
+ #ifndef TVP_FAUDIO_IMPLEMENT
+ class tTVPAudioRenderer;
+ static tTVPAudioRenderer *TVPAudioRenderer;
++// krkr2web (patch 0095): streams must unlink themselves on destruction; the
++// frame-gate probe walks this registry every RAF, so a destroyed-but-attached
++// entry faults on its first virtual call and reproducibly every frame after.
++void TVPUnregisterAudioStream(class tTVPSoundBuffer *s);
+ 
+ #ifdef __APPLE__
+ #include <OpenAL/al.h>
+@@ -129,6 +133,7 @@
+ 
+ 	virtual ~tTVPSoundBuffer()
+ 	{
++		TVPUnregisterAudioStream(this);
+ 		alDeleteBuffers(_bufferCount, _bufferIds);
+ 		alDeleteSources(1, &_alSource);
+ 		delete[] _bufferIds;
+@@ -419,7 +424,23 @@
+ 		}
+ 		return false;
+ 	}
++
++	// krkr2web (patch 0095): counterpart of CreateStream; keeps the set in
++	// sync with object lifetime.
++	void DestroyStream(tTVPSoundBuffer *s)
++	{
++		_streams.erase(s);
++	}
+ };
++
++void TVPUnregisterAudioStream(class tTVPSoundBuffer *s)
++{
++	if (!TVPAudioRenderer || !s)
++	{
++		return;
++	}
++	TVPAudioRenderer->DestroyStream(s);
++}
+ 
+ void tTVPSoundBuffer::CheckALError(const char *funcname)
+ {
