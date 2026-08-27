@@ -1255,3 +1255,43 @@ TICK_EXCEPTION 风暴消失（待下一轮真机报告复核），退出路径�
 - 回归：tmp-regress.js（boot→标题→新游戏→推进→10s 遥测）全绿：PERF
   ticks 85-100/5s、零 TICK_EXCEPTION、零页面错误。双服务端已部署
   （构建 61870cf6，8443 与 192.168.137.1:443）。
+
+### 2026-08-27（第三轮）退出排水双死因看门狗 + 注册表加固（0094，真机确认）
+
+8-26 真机 ebbab5f5 的"点退出无响应需强杀"立案为第二死因：[ws] 等 goodbye
+一次性语音时 AL 队列计数不排空（queued 恒正、processed 恒零），自然结束判据
+永不成立，场景侧死等。0094 交付：TimerBeat（~50ms 免疫泵门控）双看门狗——
+remain/samples 连续 2s 无变化即强置播放结束标志放行 ssPlay→ssStop 翻转；
+Status=play 但 SoundBuffer/Decoder 已空的幽灵态直接异步翻停。另含调度器
+timer 复用防 delete-under-fire、注册表索引化遍历与 SB/WAVE 双轨诊断 print。
+量化探针 `tools/probe_local_exit.js`：含排水死锁轮次全部 <0.9s 干净退库。
+0094 构建真机报告 ff6e237e：**退出症状根治实锤**（engine-quit、
+forcedStopCount=0，DRAIN_STALL 看门狗按设计接手 10 次）；同报告暴露风暴仍在，
+转第四轮。
+
+### 2026-08-27（第四轮）真机符号化定位 tick 风暴唯一真凶——声源悬垂注册表（0095 根治 + 复核归零）
+
+风暴自 8-25 帧救援立案以来历经"异常杀死主循环调度器"→签名错配（StrIO
+声明对齐根治了其中一类）多轮假设；本报告给出 1330 发全部单点
+`wasm-func[5445] ← dynCall_v` 且中途翻转为签名错配的确定性指纹，支撑完全
+离线符号化链：
+
+1. Python 直解 wasm 段表：V8 栈帧编号 = 代码索引 + 导入函数数（436）；
+   导出名锚定调用层 `yh=dynCall_v`（无参回调动态调用包装）。
+2. 对出货二进制做代码段逐字节同构的重链接产物（不改对象编译，仅注入
+   name 段 / `-Wl,-Map`）：炸点=`process_events_frame_gated()` 内嵌虚调用
+   槽 +0x1c；被遍历静态头=OpenALWaveMixer.cpp `TVPAudioRenderer::_streams`。
+3. 根因（0082 引入的潜伏缺陷）：该 `unordered_set<tTVPSoundBuffer*>` 只在
+   CreateStream 插入、`tTVPSoundBuffer` 析构从不摘除；帧门每 RAF 探测
+   `TVPWebAudioRemainBelow→AnyStreamRemainBelow` 即对已释放对象虚调用。
+   回标题批量卸载 13 个声源后首个探测帧起确定性爆炸且永不自愈。受
+   `&&` 短路保护，到期的引擎 tick 仍可推进——解释日志中风暴与剧本/
+   退出流并存、以及症状呈"声音短暂出现后彻底死亡"。
+
+修复=0095 三 hunk 单文件：析构先摘除注册再释放 AL 资源
+（`TVPUnregisterAudioStream`）。净树 -Clean 重放通过、工作树逐字节一致；
+本机回归 pass=2/4 与基线持平。同日真机复核 f66b182a：
+TICK_EXCEPTION **1330→0**、进游戏 WebAudio start 连续推进至退出前 1 秒、
+回标题 BGM 复活（标题剧本重载后新声源 play→EOF→自然收尾）、本轮连
+DRAIN_STALL 都未触发、退出依旧干净回库。对话窗进度条"冻结在随机位"的
+表观症状与风暴同源，随 0095 一并消除（投递节奏本身由 0093 修平）。
