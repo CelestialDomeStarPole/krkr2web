@@ -1,0 +1,290 @@
+--- a/src/core/sdl2/SDLApplication.cpp
++++ b/src/core/sdl2/SDLApplication.cpp
+@@ -3118,6 +3118,10 @@
+ 	// includes Asyncify suspensions (XP3 DecompressionStream waits), so the
+ 	// numbers reflect on-device jank directly.
+ 	static double perf_window_start = 0.0;
++	// TEMP-DIAG (0094 candidate): mirrors globalThis.__krkr2webTickStage so
++	// the epilogue (which runs even when the try body trapped) can log the
++	// stage at which the tick aborted.
++	static int krkr2webDiagStage = 0;
+ 	double perf_started = emscripten_get_now();
+ 	if (perf_window_start == 0.0) perf_window_start = perf_started;
+ #endif
+@@ -3126,10 +3130,35 @@
+ 		try
+ 		{
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+-			tTJSNI_WaveSoundBuffer::Trigger();
+-			tTVPTimerThread::Trigger();
+-#endif
+-			::Application->Run();
++			// TEMP-DIAG (0094 candidate): stage markers so a per-tick trap
++			// names the guilty sub-call. catch(...) rethrows into the
++			// existing handlers; console output lands in the diagnostics.
++			#define KRKR2WEB_DIAG_STAGE(n) do { EM_ASM({ globalThis.__krkr2webTickStage = n; }); krkr2webDiagStage = n; } while(0)
++			KRKR2WEB_DIAG_STAGE(1);
++			try {
++				tTJSNI_WaveSoundBuffer::Trigger();
++			} catch(...) {
++				EM_ASM({ console.error("KRKR2WEB_DIAG_STAGE_TRAP stage=1 wave"); });
++				throw;
++			}
++			KRKR2WEB_DIAG_STAGE(2);
++			try {
++				tTVPTimerThread::Trigger();
++			} catch(...) {
++				EM_ASM({ console.error("KRKR2WEB_DIAG_STAGE_TRAP stage=2 timer"); });
++				throw;
++			}
++#endif
++			KRKR2WEB_DIAG_STAGE(3);
++			try {
++				::Application->Run();
++			} catch(...) {
++				EM_ASM({ console.error("KRKR2WEB_DIAG_STAGE_TRAP stage=3 run"); });
++				throw;
++			}
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++			KRKR2WEB_DIAG_STAGE(0);
++#endif
+ 			if (::Application->IsTarminate())
+ 			{
+ 				TVPSystemUninit();
+@@ -3157,6 +3186,17 @@
+ 
+ #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+ 	{
++		// TEMP-DIAG (0094 candidate): stage-change print. A per-tick trap
++		// aborts the try body at a fixed stage and the epilogue still runs,
++		// so the stuck stage is logged exactly once at storm onset.
++		{
++			static int lastDiagStage = -1;
++			if(krkr2webDiagStage != lastDiagStage)
++			{
++				lastDiagStage = krkr2webDiagStage;
++				printf("KRKR2WEB_DIAG_STAGE s=%d\n", krkr2webDiagStage);
++			}
++		}
+ 		double perf_elapsed = emscripten_get_now() - perf_started;
+ 		static double perf_accum = 0.0, perf_max = 0.0;
+ 		static tjs_int perf_ticks = 0, perf_slow = 0;
+--- a/external/krkrz/sound/SoundBufferBaseImpl.cpp
++++ b/external/krkrz/sound/SoundBufferBaseImpl.cpp
+@@ -36,11 +36,19 @@
+ public:
+ 	void Handler()
+ 	{
+-		std::vector<tTJSNI_SoundBuffer *>::iterator i;
+-		for(i = TVPSoundBufferVector.begin(); i != TVPSoundBufferVector.end();
+-			i++)
++		// krkr2web (TEMP-DIAG 0094 candidate): index-based walk so an
++		// erase/push_back during a beat cannot dangle the iterator, plus
++		// per-beat trap logging that names the entry that faulted.
++		for(size_t n = 0; n < TVPSoundBufferVector.size(); n++)
+ 		{
+-			(*i)->TimerBeatHandler();
++			try {
++				TVPSoundBufferVector[n]->TimerBeatHandler();
++			} catch(...) {
++				printf("KRKR2WEB_DIAG_SB_TRAP idx=%d n=%d entry=%p vtbl=0x%x\r\n",
++					(int)n, (int)TVPSoundBufferVector.size(), (void*)TVPSoundBufferVector[n],
++					TVPSoundBufferVector[n] ? *(unsigned int*)(void*)TVPSoundBufferVector[n] : 0);
++				throw;
++			}
+ 		}
+ 		TVPWaveSoundBufferCommitSettings();	// for DirectSound(Windows7)
+ 	}
+@@ -48,12 +56,16 @@
+ //---------------------------------------------------------------------------
+ void TVPAddSoundBuffer(tTJSNI_SoundBuffer * buf)
+ {
++	printf("KRKR2WEB_DIAG_SB_ADD ptr=%p\r\n", (void*)buf);
+ 	if(TVPSoundBufferVector.size() == 0)
+ 	{
+ 		// first buffer
+-		TVPSoundBufferTimer = new TVPTimer(); // Create Timer Object
+-		TVPSoundBufferTimer->SetInterval( TVP_SB_BEAT_INTERVAL );
+-		TVPSoundBufferTimer->SetOnTimerHandler( &TVPSoundBufferTimerDispatcher, &tTVPSoundBufferTimerDispatcher::Handler );
++		if(!TVPSoundBufferTimer)
++		{
++			TVPSoundBufferTimer = new TVPTimer(); // Create Timer Object
++			TVPSoundBufferTimer->SetInterval( TVP_SB_BEAT_INTERVAL );
++			TVPSoundBufferTimer->SetOnTimerHandler( &TVPSoundBufferTimerDispatcher, &tTVPSoundBufferTimerDispatcher::Handler );
++		}
+ 		TVPSoundBufferTimer->SetEnabled( true );
+ 	}
+ 
+@@ -62,6 +74,7 @@
+ //---------------------------------------------------------------------------
+ void TVPRemoveSoundBuffer(tTJSNI_SoundBuffer *buf)
+ {
++	printf("KRKR2WEB_DIAG_SB_REMOVE ptr=%p\r\n", (void*)buf);
+ 	if(TVPSoundBufferVector.size() != 0)
+ 	{
+ 		std::vector<tTJSNI_SoundBuffer *>::iterator i;
+@@ -75,8 +88,12 @@
+ 
+ 	if(TVPSoundBufferVector.size() == 0)
+ 	{
+-		// all buffer was removed
+-		delete TVPSoundBufferTimer;
++		// krkr2web (TEMP-DIAG 0094 candidate): the dispatcher timer may be
++		// firing this very callback; deleting it here frees the timer under
++		// its own Fire (the post-Fire PendingCount write then lands in
++		// reused heap). Disable and keep it instead; TVPAddSoundBuffer
++		// re-enables. The old delete also left the static pointer dangling.
++		if(TVPSoundBufferTimer) TVPSoundBufferTimer->SetEnabled(false);
+ 	}
+ }
+ //---------------------------------------------------------------------------
+--- a/external/krkrz/sound/SoundBufferBaseIntf.cpp
++++ b/external/krkrz/sound/SoundBufferBaseIntf.cpp
+@@ -74,6 +74,9 @@
+ {
+ 	if(Status != s)
+ 	{
++		// krkr2web TEMP-DIAG: status transition log
++		printf("KRKR2WEB_DIAG_SB_STATUS ptr=%p %d->%d\r\n",
++			(void*)this, (int)Status, (int)s);
+ 		Status = s;
+ 
+ 		if(Owner)
+@@ -101,6 +104,8 @@
+ 
+ 	if(Status != s)
+ 	{
++		printf("KRKR2WEB_DIAG_SB_STATUS_ASYNC ptr=%p %d->%d\r\n",
++			(void*)this, (int)Status, (int)s);
+ 		Status = s;
+ 
+ 		if(CanDeliverEvents)
+--- a/src/core/sound/sdl2/WaveImpl.cpp
++++ b/src/core/sound/sdl2/WaveImpl.cpp
+@@ -21,6 +21,7 @@
+ #include "MsgIntf.h"
+ #include "StorageIntf.h"
+ #include "WaveImpl.h"
++#include <map>
+ #include "PluginImpl.h"
+ #include "SysInitIntf.h"
+ #include "ThreadIntf.h"
+@@ -1789,17 +1790,25 @@
+ 				// seconds to rebuild and audibly glitches. FillBuffer returns
+ 				// true once the queue is full, paused or ended.
+ 				tjs_uint32 fill_deadline = TVPGetRoughTickCount32() + 8;
+-				std::vector<tTJSNI_WaveSoundBuffer *>::iterator i;
+-				for(i = TVPWaveSoundBufferVector.begin();
+-					i != TVPWaveSoundBufferVector.end(); i++)
++				// krkr2web (TEMP-DIAG 0094 candidate): index walk + trap
++				// logging so a faulting entry names itself.
++				for(size_t n = 0; n < TVPWaveSoundBufferVector.size(); n++)
+ 				{
+-					if((*i)->ThreadCallbackEnabled)
+-					{
+-						while(!(*i)->FillBuffer() &&
+-							TVPGetRoughTickCount32() < fill_deadline)
++					tTJSNI_WaveSoundBuffer * entry = TVPWaveSoundBufferVector[n];
++					try {
++						if(entry->ThreadCallbackEnabled)
+ 						{
+-							// keep filling until budget or queue cap
++							while(!entry->FillBuffer() &&
++								TVPGetRoughTickCount32() < fill_deadline)
++							{
++								// keep filling until budget or queue cap
++							}
+ 						}
++					} catch(...) {
++						printf("KRKR2WEB_DIAG_WAVE_TRAP idx=%d n=%d entry=%p vtbl=0x%x\n",
++							(int)n, (int)TVPWaveSoundBufferVector.size(), (void*)entry,
++							entry ? *(unsigned int*)(void*)entry : 0);
++						throw;
+ 					}
+ 				}
+ 				LastFilledTick = time;
+@@ -1879,6 +1888,7 @@
+ static void TVPAddWaveSoundBuffer(tTJSNI_WaveSoundBuffer * buffer)
+ {
+ 	tTJSCriticalSectionHolder holder(TVPWaveSoundBufferVectorCS);
++	printf("KRKR2WEB_DIAG_WAVE_ADD ptr=%p\n", (void*)buffer);
+ 	TVPWaveSoundBufferVector.push_back(buffer);
+ }
+ //---------------------------------------------------------------------------
+@@ -1886,6 +1896,7 @@
+ {
+ 	bool bufferempty;
+ 
++	printf("KRKR2WEB_DIAG_WAVE_REMOVE ptr=%p\n", (void*)buffer);
+ 	{
+ 		tTJSCriticalSectionHolder holder(TVPWaveSoundBufferVectorCS);
+ 		std::vector<tTJSNI_WaveSoundBuffer *>::iterator i;
+@@ -2640,7 +2651,8 @@
+ 			AccessUnitSamples,
+ 			L2BufferSegmentQueues[L2BufferWritePos]);
+ 
+-		if(decoded < (tjs_uint) AccessUnitSamples) L2BufferEnded = true;
++		if(decoded < (tjs_uint) AccessUnitSamples) { L2BufferEnded = true;
++			printf("KRKR2WEB_DIAG_WAVE_DECODE_EOF ptr=%p decoded=%u\n", (void*)this, (unsigned)decoded); }
+ 
+ 		L2BufferDecodedSamplesInUnit[L2BufferWritePos] = decoded;
+ 	}
+@@ -2858,6 +2870,7 @@
+ #endif
+ 		if (L2BufferEnded) {
+ 			if (SoundBuffer->GetRemainBuffers() == 0) {
++					printf("KRKR2WEB_DIAG_WAVE_NATURAL_END ptr=%p\n", (void*)this);
+ 					FlushAllLabelEvents();
+ 					SoundBuffer->Pause();
+ 					ResetSamplePositions();
+@@ -3199,12 +3212,50 @@
+ //---------------------------------------------------------------------------
+ void tTJSNI_WaveSoundBuffer::TimerBeatHandler()
+ {
++	// krkr2web: drain watchdog (runs every dispatcher beat regardless of
++	// pump gating). One-shot streams whose AL queue counter never drains
++	//(host shim quirk) would keep Status==ssPlay forever and deadlock
++	// scenario waits like the exit-voice sync; force-complete instead.
++	if(Status == ssPlay && (!SoundBuffer || !Decoder))
++	{
++		// krkr2web: ghost state - engine reports playing but the device
++		// objects are already gone; nothing will ever finish it.
++		printf("KRKR2WEB_DIAG_WAVE_GHOST_STOP ptr=%p\n", (void*)this);
++		ThreadCallbackEnabled = false;
++		TVPCheckSoundBufferAllSleep();
++		Thread->Interrupt();
++		SetStatusAsync(ssStop);
++	}
++	else if(Status == ssPlay && BufferPlaying && SoundBuffer)
++	{
++		static std::map<void*, tjs_uint> wdRemain;
++		static std::map<void*, tjs_uint> wdSamples;
++		static std::map<void*, tjs_uint32> wdSince;
++		int remain = SoundBuffer->GetRemainBuffers();
++		tjs_uint samples = SoundBuffer->GetCurrentPlaySamples();
++		if(remain != (int)wdRemain[this] || samples != wdSamples[this])
++		{
++			wdRemain[this] = remain;
++			wdSamples[this] = samples;
++			wdSince[this] = TVPGetRoughTickCount32();
++		}
++		else if(TVPGetRoughTickCount32() - wdSince[this] > 2000)
++		{
++			printf("KRKR2WEB_DIAG_WAVE_DRAIN_STALL ptr=%p remain=%d samples=%u\n",
++				(void*)this, remain, (unsigned)samples);
++			// force-complete: let the ssPlay->ssStop flip below proceed.
++			DSBufferPlaying = false;
++			BufferPlaying = false;
++		}
++	}
+ 	inherited::TimerBeatHandler();
++
+ 
+ 	// check buffer stopping
+ 	if(Status == ssPlay && !BufferPlaying)
+ 	{
+ 		// buffer was stopped
++		printf("KRKR2WEB_DIAG_WAVE_BEAT_FLIP_STOP ptr=%p\n", (void*)this);
+ 		ThreadCallbackEnabled = false;
+ 		TVPCheckSoundBufferAllSleep();
+ 		Thread->Interrupt();

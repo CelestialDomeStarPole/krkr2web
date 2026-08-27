@@ -1,234 +1,235 @@
 {
- "schemaVersion": 1,
- "repository": "https://github.com/krkrsdl2/krkrsdl2.git",
- "commit": "3f384a6869f6726929c777bdd0e0c871d5d5383d",
- "localCheckout": "参考资料/开源项目/krkrsdl2",
- "emscriptenVersion": "3.1.64",
- "sourceImports": [
-  {
-   "name": "KAGParser",
-   "repository": "https://github.com/2468785842/krkr2.git",
-   "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
-   "localCheckout": "参考资料/开源项目/krkr2",
-   "license": "LICENSE",
-   "files": [
+  "schemaVersion": 1,
+  "repository": "https://github.com/krkrsdl2/krkrsdl2.git",
+  "commit": "3f384a6869f6726929c777bdd0e0c871d5d5383d",
+  "localCheckout": "参考资料/开源项目/krkrsdl2",
+  "emscriptenVersion": "3.1.64",
+  "sourceImports": [
     {
-     "source": "cpp/core/base/KAGParser.cpp",
-     "target": "external/krkrz/base/KAGParser.cpp"
+      "name": "KAGParser",
+      "repository": "https://github.com/2468785842/krkr2.git",
+      "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
+      "localCheckout": "参考资料/开源项目/krkr2",
+      "license": "LICENSE",
+      "files": [
+        {
+          "source": "cpp/core/base/KAGParser.cpp",
+          "target": "external/krkrz/base/KAGParser.cpp"
+        },
+        {
+          "source": "cpp/core/base/KAGParser.h",
+          "target": "external/krkrz/base/KAGParser.h"
+        }
+      ]
     },
     {
-     "source": "cpp/core/base/KAGParser.h",
-     "target": "external/krkrz/base/KAGParser.h"
+      "name": "NCBPlugins",
+      "repository": "https://github.com/2468785842/krkr2.git",
+      "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
+      "localCheckout": "参考资料/开源项目/krkr2",
+      "license": "LICENSE",
+      "files": [
+        {
+          "source": "cpp/core/plugin/ncbind.hpp",
+          "target": "external/krkrz/plugin/ncbind.hpp"
+        },
+        {
+          "source": "cpp/core/plugin/ncb_invoke.hpp",
+          "target": "external/krkrz/plugin/ncb_invoke.hpp"
+        },
+        {
+          "source": "cpp/core/plugin/ncb_foreach.inc",
+          "target": "external/krkrz/plugin/ncb_foreach.inc"
+        },
+        {
+          "source": "cpp/core/plugin/ncbind.cpp",
+          "target": "external/krkrz/plugin/ncbind.cpp"
+        },
+        {
+          "source": "cpp/core/plugin/PluginImpl.h",
+          "target": "external/krkrz/plugin/PluginImpl.h"
+        },
+        {
+          "source": "cpp/core/plugin/PluginIntf.h",
+          "target": "external/krkrz/plugin/PluginIntf.h"
+        },
+        {
+          "source": "cpp/core/environ/Platform.h",
+          "target": "external/krkrz/environ/Platform.h"
+        },
+        {
+          "source": "cpp/plugins/fstat/main.cpp",
+          "target": "external/krkrz/plugin/fstat/main.cpp"
+        },
+        {
+          "source": "cpp/plugins/getSample.cpp",
+          "target": "external/krkrz/plugin/getSample.cpp"
+        },
+        {
+          "source": "cpp/plugins/scriptsEx.cpp",
+          "target": "external/krkrz/plugin/scriptsEx.cpp"
+        },
+        {
+          "source": "cpp/plugins/windowEx.cpp",
+          "target": "external/krkrz/plugin/windowEx.cpp"
+        },
+        {
+          "source": "cpp/plugins/win32_dt.h",
+          "target": "external/krkrz/plugin/win32_dt.h"
+        }
+      ]
+    },
+    {
+      "name": "csvParser",
+      "repository": "https://github.com/wtnbgo/csvParser.git",
+      "commit": "7c757cf4c98e0ad314a8bdcd1d78751da6045bbe",
+      "localCheckout": "参考资料/开源项目/csvParser",
+      "license": "readme.txt",
+      "files": [
+        {
+          "source": "main.cpp",
+          "target": "external/krkrz/plugin/csvParser/main.cpp"
+        }
+      ]
+    },
+    {
+      "name": "Kirikiroid2WebMotionRuntime",
+      "repository": "https://github.com/fenghengzhi/kirikiroid2-web.git",
+      "commit": "338d2029f16969b84becfd163c67f99740e28296",
+      "localCheckout": "参考资料/开源项目/kirikiroid2-web",
+      "license": "LICENSE",
+      "directories": [
+        {
+          "source": "cpp/plugins/motionplayer",
+          "target": "external/krkrz/plugin/motionplayer"
+        },
+        {
+          "source": "cpp/plugins/psbfile",
+          "target": "external/krkrz/plugin/psbfile"
+        }
+      ],
+      "files": [
+        {
+          "source": "cpp/plugins/BinaryAccessor.cpp",
+          "target": "external/krkrz/plugin/BinaryAccessor.cpp"
+        },
+        {
+          "source": "cpp/plugins/xp3filter.cpp",
+          "target": "external/krkrz/plugin/xp3filter.cpp"
+        },
+        {
+          "source": "cpp/plugins/xp3filter.h",
+          "target": "external/krkrz/plugin/xp3filter.h"
+        },
+        {
+          "source": "cpp/plugins/DrawDeviceD3DIntf.h",
+          "target": "external/krkrz/plugin/DrawDeviceD3DIntf.h"
+        },
+        {
+          "source": "cpp/core/visual/RenderManager.h",
+          "target": "external/krkrz/plugin/motionplayer/RenderManager.h"
+        },
+        {
+          "source": "cpp/core/visual/ogl/imagepacker.cpp",
+          "target": "external/krkrz/core/visual/ogl/imagepacker.cpp"
+        },
+        {
+          "source": "cpp/core/visual/ogl/imagepacker.h",
+          "target": "external/krkrz/core/visual/ogl/imagepacker.h"
+        }
+      ]
     }
-   ]
-  },
-  {
-   "name": "NCBPlugins",
-   "repository": "https://github.com/2468785842/krkr2.git",
-   "commit": "dca7264572a63e753c1b07ca7053513d1751ce70",
-   "localCheckout": "参考资料/开源项目/krkr2",
-   "license": "LICENSE",
-   "files": [
-    {
-     "source": "cpp/core/plugin/ncbind.hpp",
-     "target": "external/krkrz/plugin/ncbind.hpp"
-    },
-    {
-     "source": "cpp/core/plugin/ncb_invoke.hpp",
-     "target": "external/krkrz/plugin/ncb_invoke.hpp"
-    },
-    {
-     "source": "cpp/core/plugin/ncb_foreach.inc",
-     "target": "external/krkrz/plugin/ncb_foreach.inc"
-    },
-    {
-     "source": "cpp/core/plugin/ncbind.cpp",
-     "target": "external/krkrz/plugin/ncbind.cpp"
-    },
-    {
-     "source": "cpp/core/plugin/PluginImpl.h",
-     "target": "external/krkrz/plugin/PluginImpl.h"
-    },
-    {
-     "source": "cpp/core/plugin/PluginIntf.h",
-     "target": "external/krkrz/plugin/PluginIntf.h"
-    },
-    {
-     "source": "cpp/core/environ/Platform.h",
-     "target": "external/krkrz/environ/Platform.h"
-    },
-    {
-     "source": "cpp/plugins/fstat/main.cpp",
-     "target": "external/krkrz/plugin/fstat/main.cpp"
-    },
-    {
-     "source": "cpp/plugins/getSample.cpp",
-     "target": "external/krkrz/plugin/getSample.cpp"
-    },
-    {
-     "source": "cpp/plugins/scriptsEx.cpp",
-     "target": "external/krkrz/plugin/scriptsEx.cpp"
-    },
-    {
-     "source": "cpp/plugins/windowEx.cpp",
-     "target": "external/krkrz/plugin/windowEx.cpp"
-    },
-    {
-     "source": "cpp/plugins/win32_dt.h",
-     "target": "external/krkrz/plugin/win32_dt.h"
-    }
-   ]
-  },
-  {
-   "name": "csvParser",
-   "repository": "https://github.com/wtnbgo/csvParser.git",
-   "commit": "7c757cf4c98e0ad314a8bdcd1d78751da6045bbe",
-   "localCheckout": "参考资料/开源项目/csvParser",
-   "license": "readme.txt",
-   "files": [
-    {
-     "source": "main.cpp",
-     "target": "external/krkrz/plugin/csvParser/main.cpp"
-    }
-   ]
-  },
-  {
-   "name": "Kirikiroid2WebMotionRuntime",
-   "repository": "https://github.com/fenghengzhi/kirikiroid2-web.git",
-   "commit": "338d2029f16969b84becfd163c67f99740e28296",
-   "localCheckout": "参考资料/开源项目/kirikiroid2-web",
-   "license": "LICENSE",
-   "directories": [
-    {
-     "source": "cpp/plugins/motionplayer",
-     "target": "external/krkrz/plugin/motionplayer"
-    },
-    {
-     "source": "cpp/plugins/psbfile",
-     "target": "external/krkrz/plugin/psbfile"
-    }
-   ],
-   "files": [
-    {
-     "source": "cpp/plugins/BinaryAccessor.cpp",
-     "target": "external/krkrz/plugin/BinaryAccessor.cpp"
-    },
-    {
-     "source": "cpp/plugins/xp3filter.cpp",
-     "target": "external/krkrz/plugin/xp3filter.cpp"
-    },
-    {
-     "source": "cpp/plugins/xp3filter.h",
-     "target": "external/krkrz/plugin/xp3filter.h"
-    },
-    {
-     "source": "cpp/plugins/DrawDeviceD3DIntf.h",
-     "target": "external/krkrz/plugin/DrawDeviceD3DIntf.h"
-    },
-    {
-     "source": "cpp/core/visual/RenderManager.h",
-     "target": "external/krkrz/plugin/motionplayer/RenderManager.h"
-    },
-    {
-     "source": "cpp/core/visual/ogl/imagepacker.cpp",
-     "target": "external/krkrz/core/visual/ogl/imagepacker.cpp"
-    },
-    {
-     "source": "cpp/core/visual/ogl/imagepacker.h",
-     "target": "external/krkrz/core/visual/ogl/imagepacker.h"
-    }
-   ]
-  }
- ],
- "patches": [
-  "patches/0001-web-indexeddb-xp3.patch",
-  "patches/0002-enable-kag-parser.patch",
-  "patches/0003-web-preserve-host-layout.patch",
-  "patches/0004-web-engine-profile-bootstrap.patch",
-  "patches/0005-web-xp3-index-progress.patch",
-  "patches/0006-web-decompression-stream.patch",
-  "patches/0007-web-plugin-contract.patch",
-  "patches/0008-web-addfont-shim.patch",
-  "patches/0009-web-uncompressed-save.patch",
-  "patches/0010-web-motion-shim.patch",
-  "patches/0011-ncbind-set-include.patch",
-  "patches/0013-tjsstring-std-string-ctor.patch",
-  "patches/0014-ncb-plugin-build.patch",
-  "patches/0015-ncb-link-loadmodule.patch",
-  "patches/0016-fstat-no-filesystem.patch",
-  "patches/0017-whole-archive-plugins.patch",
-  "patches/0018-csvparser-port.patch",
-  "patches/0019-csvparser-build-link.patch",
-  "patches/0020-ncb-plugins-getsample-scriptsex.patch",
-  "patches/0021-getlangname-shim.patch",
-  "patches/0022-windowex-shim.patch",
-  "patches/0023-getlocallyaccessiblename-empty-guard.patch",
-  "patches/0024-loadimages-auto-allocate.patch",
-  "patches/0025-libwebp-decode.patch",
-  "patches/0026-webp-loader-router.patch",
-  "patches/0027-psbfile-build.patch",
-  "patches/0028-tjsstring-indexof-substring.patch",
-  "patches/0029-savestruct-build.patch",
-  "patches/0030-textrender-layereximage-build.patch",
-  "patches/0031-tjsstring-lenient-narrow.patch",
-  "patches/0032-layer-raster-btoa-packinone.patch",
-  "patches/0033-layerexdraw-stub.patch",
-  "patches/0034-kag-diagnostics.patch",
-  "patches/0035-emscripten-input-path.patch",
-  "patches/0036-kag-emb-unescaped-expansion.patch",
-  "patches/0038-ogg-vorbis-streaming.patch",
-  "patches/0039-web-transition-fallback-force-terminate.patch",
-  "patches/0040-web-perf-graphic-cache-audio-fill.patch",
-  "patches/0041-web-trans-throttle-heartbeat-stats.patch",
-  "patches/0042-web-video-overlay-bridge.patch",
-  "patches/0043-web-engine-quit-notify-audio-cushion.patch",
-  "patches/0044-web-audio-position-input-perf.patch",
-  "patches/0045-web-gpu-style-present-fast-transition.patch",
-  "patches/0046-web-input-frame-budget.patch",
-  "patches/0047-tjs-readi8-compat.patch",
-  "patches/0048-motionplayer-layer-clip-compat.patch",
-  "patches/0049-motionplayer-layer-mesh-port.patch",
-  "patches/0050-motionplayer-wasm-simd-feature-gate.patch",
-  "patches/0051-motionplayer-web-software-private-layer-gate.patch",
-  "patches/0053-emscripten-threaded-variant-exports.patch",
-  "patches/0054-emscripten-feature-option-conditions.patch",
-  "patches/0055-emscripten-thread-simd-flag-scope.patch",
-  "patches/0057-emscripten-threaded-worker-environment.patch",
-  "patches/0058-emscripten-threaded-host-bridges.patch",
-  "patches/0059-native-windowex-plugin.patch",
-  "patches/0060-async-html5-pthread-events.patch",
-  "patches/0061-windowex-web-platform-module.patch",
-  "patches/0062-dedicated-worker-offscreen-canvas.patch",
-  "patches/0063-motionplayer-tjs-array-container-compat.patch",
-  "patches/0064-binary-accessor-build-boundary.patch",
-  "patches/0065-motionplayer-resource-manager-krkrsdl2-api.patch",
-  "patches/0066-motionplayer-krkrsdl2-layer-texture-boundary.patch",
-  "patches/0067-motionplayer-private-gll-web-stub-signature.patch",
-  "patches/0068-motionplayer-target-texture-limit.patch",
-  "patches/0069-psb-script-materialized-root.patch",
-  "patches/0070-motionplayer-software-color-modulation.patch",
-  "patches/0071-win32dialog-shim.patch",
-  "patches/0072-web-skip-user-cfu-config.patch",
-  "patches/0073-tjs-int32-to-hex-zeropad-guard.patch",
-  "patches/0074-web-touch-multi-finger.patch",
-  "patches/0075-k2compat-touchmouse-shim.patch",
-  "patches/0076-motionplayer-psb-krkr-order-textures.patch",
-  "patches/0077-web-graphic-load-timing.patch",
-  "patches/0078-win32dialog-messagebox-page-ask.patch",
-  "patches/0079-web-xp3-prefetch-park.patch",
-  "patches/0080-web-graphic-park-fast-path.patch",
-  "patches/0081-web-audio-cushion-cache-bump.patch",
-  "patches/0082-web-main-loop-frame-rate-limit.patch",
-  "patches/0083-web-tick-software-pll.patch",
-  "patches/0084-web-sync-exit-graceful-reroute.patch",
-  "patches/0085-web-autopath-dirty-check.patch",
-  "patches/0086-web-xp3-index-snapshot.patch",
-  "patches/0087-web-tlg-async-toggle.patch",
-  "patches/0088-psb-container-and-root-caches.patch",
-  "patches/0089-web-compact-graphic-cache-discipline.patch",
-  "patches/0090-device-oom-root-release-and-heap-ceiling.patch",
-  "patches/0091-dialog-ask-traceability.patch",
-  "patches/0092-symbol-map-and-signature-mismatch-fix.patch",
-  "patches/0093-web-timer-exact-boundary-fire.patch"
- ]
+  ],
+  "patches": [
+    "patches/0001-web-indexeddb-xp3.patch",
+    "patches/0002-enable-kag-parser.patch",
+    "patches/0003-web-preserve-host-layout.patch",
+    "patches/0004-web-engine-profile-bootstrap.patch",
+    "patches/0005-web-xp3-index-progress.patch",
+    "patches/0006-web-decompression-stream.patch",
+    "patches/0007-web-plugin-contract.patch",
+    "patches/0008-web-addfont-shim.patch",
+    "patches/0009-web-uncompressed-save.patch",
+    "patches/0010-web-motion-shim.patch",
+    "patches/0011-ncbind-set-include.patch",
+    "patches/0013-tjsstring-std-string-ctor.patch",
+    "patches/0014-ncb-plugin-build.patch",
+    "patches/0015-ncb-link-loadmodule.patch",
+    "patches/0016-fstat-no-filesystem.patch",
+    "patches/0017-whole-archive-plugins.patch",
+    "patches/0018-csvparser-port.patch",
+    "patches/0019-csvparser-build-link.patch",
+    "patches/0020-ncb-plugins-getsample-scriptsex.patch",
+    "patches/0021-getlangname-shim.patch",
+    "patches/0022-windowex-shim.patch",
+    "patches/0023-getlocallyaccessiblename-empty-guard.patch",
+    "patches/0024-loadimages-auto-allocate.patch",
+    "patches/0025-libwebp-decode.patch",
+    "patches/0026-webp-loader-router.patch",
+    "patches/0027-psbfile-build.patch",
+    "patches/0028-tjsstring-indexof-substring.patch",
+    "patches/0029-savestruct-build.patch",
+    "patches/0030-textrender-layereximage-build.patch",
+    "patches/0031-tjsstring-lenient-narrow.patch",
+    "patches/0032-layer-raster-btoa-packinone.patch",
+    "patches/0033-layerexdraw-stub.patch",
+    "patches/0034-kag-diagnostics.patch",
+    "patches/0035-emscripten-input-path.patch",
+    "patches/0036-kag-emb-unescaped-expansion.patch",
+    "patches/0038-ogg-vorbis-streaming.patch",
+    "patches/0039-web-transition-fallback-force-terminate.patch",
+    "patches/0040-web-perf-graphic-cache-audio-fill.patch",
+    "patches/0041-web-trans-throttle-heartbeat-stats.patch",
+    "patches/0042-web-video-overlay-bridge.patch",
+    "patches/0043-web-engine-quit-notify-audio-cushion.patch",
+    "patches/0044-web-audio-position-input-perf.patch",
+    "patches/0045-web-gpu-style-present-fast-transition.patch",
+    "patches/0046-web-input-frame-budget.patch",
+    "patches/0047-tjs-readi8-compat.patch",
+    "patches/0048-motionplayer-layer-clip-compat.patch",
+    "patches/0049-motionplayer-layer-mesh-port.patch",
+    "patches/0050-motionplayer-wasm-simd-feature-gate.patch",
+    "patches/0051-motionplayer-web-software-private-layer-gate.patch",
+    "patches/0053-emscripten-threaded-variant-exports.patch",
+    "patches/0054-emscripten-feature-option-conditions.patch",
+    "patches/0055-emscripten-thread-simd-flag-scope.patch",
+    "patches/0057-emscripten-threaded-worker-environment.patch",
+    "patches/0058-emscripten-threaded-host-bridges.patch",
+    "patches/0059-native-windowex-plugin.patch",
+    "patches/0060-async-html5-pthread-events.patch",
+    "patches/0061-windowex-web-platform-module.patch",
+    "patches/0062-dedicated-worker-offscreen-canvas.patch",
+    "patches/0063-motionplayer-tjs-array-container-compat.patch",
+    "patches/0064-binary-accessor-build-boundary.patch",
+    "patches/0065-motionplayer-resource-manager-krkrsdl2-api.patch",
+    "patches/0066-motionplayer-krkrsdl2-layer-texture-boundary.patch",
+    "patches/0067-motionplayer-private-gll-web-stub-signature.patch",
+    "patches/0068-motionplayer-target-texture-limit.patch",
+    "patches/0069-psb-script-materialized-root.patch",
+    "patches/0070-motionplayer-software-color-modulation.patch",
+    "patches/0071-win32dialog-shim.patch",
+    "patches/0072-web-skip-user-cfu-config.patch",
+    "patches/0073-tjs-int32-to-hex-zeropad-guard.patch",
+    "patches/0074-web-touch-multi-finger.patch",
+    "patches/0075-k2compat-touchmouse-shim.patch",
+    "patches/0076-motionplayer-psb-krkr-order-textures.patch",
+    "patches/0077-web-graphic-load-timing.patch",
+    "patches/0078-win32dialog-messagebox-page-ask.patch",
+    "patches/0079-web-xp3-prefetch-park.patch",
+    "patches/0080-web-graphic-park-fast-path.patch",
+    "patches/0081-web-audio-cushion-cache-bump.patch",
+    "patches/0082-web-main-loop-frame-rate-limit.patch",
+    "patches/0083-web-tick-software-pll.patch",
+    "patches/0084-web-sync-exit-graceful-reroute.patch",
+    "patches/0085-web-autopath-dirty-check.patch",
+    "patches/0086-web-xp3-index-snapshot.patch",
+    "patches/0087-web-tlg-async-toggle.patch",
+    "patches/0088-psb-container-and-root-caches.patch",
+    "patches/0089-web-compact-graphic-cache-discipline.patch",
+    "patches/0090-device-oom-root-release-and-heap-ceiling.patch",
+    "patches/0091-dialog-ask-traceability.patch",
+    "patches/0092-symbol-map-and-signature-mismatch-fix.patch",
+    "patches/0093-web-timer-exact-boundary-fire.patch",
+    "patches/0094-web-audio-drain-watchdog-and-sound-registry-hardening.patch"
+  ]
 }

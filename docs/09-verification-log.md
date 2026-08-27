@@ -139,6 +139,23 @@
     "owner" 异常是否自愈。详见
     [迁移开发记录](10-migration-log.md) 2026-08-26 第二轮条目。
 
+- **2026-08-27（第三轮，引擎+Web）退出挂死音频排水看门狗（0094）+ 风暴插桩交付**：
+    8-26 真机报告 ebbab5f5 三症状（回标题数秒后 BGM 停、音频进度条冻结在随机位、
+    点退出无响应需强杀）定位为 title.ks `*wait` 后每 tick wasm 陷阱风暴
+    （1450 连发 TICK_EXCEPTION 于 process_events 内联音频虚调用槽 +28/+64）；
+    重入/网络延迟假设经 PERF=100tick 精确值、本地 rafDepth、加迟探针逐一排除。
+    插桩构建（DIAG_STAGE/SB/WAVE/TIMER 双轨日志 + 注册表索引化遍历 + 调度器
+    timer 复用防 delete-under-fire，0094 前半）本地复测期间意外固化**第二死因**：
+    [ws] 等 goodbye 语音时 AL 队列计数不排空（q 恒正 p 恒零）令自然结束判据永不
+    成立 → 场景侧等音停死锁。0094 加双看门狗：TimerBeat 每 2s 核对
+    remain/samples 无变化即强置结束标志；Status=play 但设备对象已空的幽灵态
+    直接异步翻停。量化探针 tools/probe_local_exit.js：含 drainStall 的轮次
+    全部 <0.9s 正常退库。桌面 CUA 直控验证被否决（画布捕获恒黑+坐标派发
+    被窗口身份校验拒绝），方法论沉淀 docs/11-local-verify-skill.md 与用户级
+    skill。-Clean 净树重导出流水线验证补丁可应用，构建随本条目部署双服务端。
+    待真机：① 风暴是否复现及 DIAG_STAGE 定位首个炸点；② 退出路径实感；
+    ③ 本地偶发整轮超时（触点模拟层噪声嫌疑）由真机触摸复核。
+
 ## 待完成验收项
 
 1. 典型剧情 20 FPS 与 60 分钟稳定性的正式实机测量（门禁方法沿用 D3 的累计
