@@ -179,18 +179,31 @@
     关停时一次 A004 噪声与菜单 shim "owner" 异常。
 
 - **2026-08-27（阶段收尾）音频三症状战役闭环审计**：本阶段三症状全部
-    根治并经真机复核归零——①回标题 BGM 停响：0095 斩断悬垂遍历（真机
-    TICK_EXCEPTION 1330→0、BGM 复活、WebAudio start 连续至退出前 1 秒）；
-    ②点退出不能自动回库需强杀：两个独立死因先后根治（0088-0092 线的签名
-    错配风暴 + 0094 音频排水死锁看门狗/幽灵态兜底，真机连续两轮
-    engine-quit 且 forcedStopCount=0）；③对话窗右下音频进度条冻结：
-    0093 投递节奏双修（`<=` 边界 + 同步 flush）解决隔拍卡顿，冻结位随机
-    的表观症状与 ① 同源，随 0095 消除。交付链 0092→0095 全部登记
-    upstream.json 并经 -Clean 净树重放验证；0094 引入的 TEMP-DIAG 插桩
-    （DIAG_STAGE/SB_TRAP/WAVE_TRAP/SB_STATUS 等 print）完成历史使命，
-    保留于构建中——engineLog 为 2000 行环形缓冲，风暴级刷屏已不可能重现，
-    下轮如做精简属纯降噪、非正确性需求。队列残留（均不阻塞体验）：关停期
-    单次 A004 提示、菜单 shim "owner" TJS 异常、进度条体感复验。
+  根治并经真机复核归零——①回标题 BGM 停响：0095 斩断悬垂遍历（真机
+  TICK_EXCEPTION 1330→0、BGM 复活、WebAudio start 连续至退出前 1 秒）；
+  ②点退出不能自动回库需强杀：两个独立死因先后根治（0088-0092 线的签名
+  错配风暴 + 0094 音频排水死锁看门狗/幽灵态兜底，真机连续两轮
+  engine-quit 且 forcedStopCount=0）；③对话窗右下音频进度条冻结：
+  0093 投递节奏双修（`<=` 边界 + 同步 flush）解决隔拍卡顿，冻结位随机
+  的表观症状与 ① 同源，随 0095 消除。交付链 0092→0095 全部登记
+  upstream.json 并经 -Clean 净树重放验证；0094 引入的 TEMP-DIAG 插桩
+  （DIAG_STAGE/SB_TRAP/WAVE_TRAP/SB_STATUS 等 print）完成历史使命，
+  保留于构建中——engineLog 为 2000 行环形缓冲，风暴级刷屏已不可能重现，
+  下轮如做精简属纯降噪、非正确性需求。队列残留（均不阻塞体验）：关停期
+  单次 A004 提示、菜单 shim "owner" TJS 异常、进度条体感复验。
+
+- **2026-09-06 限速基准修复——全新 profile 首启屏只认触摸输入**：9-5 晚
+  在全新审计 profile 上重开 0095 引擎基线的尝试（标签 0096）失败中断；
+  判别探针 `tools/d5_probe_input.js` 定性唯一根因——首 boot 流
+  （logo→caution→langselect）只认触摸事件，bench 全程鼠标点击且无
+  hasTouch（8-26 探针方法论结论的又一实证；8-24 暖 profile 成功轮未遇
+  首启屏属侥幸）。修复（纯测试层）：bench 加 hasTouch、画布内交互全部
+  改 touchscreen.tap、boot 门控改为 engineLog `title.ks *wait` 标记对
+  （首启跳屏循环）。同规格重跑 0096b-r6 全通（newGame=true、
+  voiceCount=8、语音起播 p50 740ms@rate6）。新增探针
+  d5_install_profile/d5_probe_start/d5_probe_input 一并入库；为验收项 1
+  （60 分钟稳定性）的本机长跑铺平道路。详见
+  [迁移开发记录](10-migration-log.md) 2026-09-06 条目。
 ## 待完成验收项
 
 1. 典型剧情 20 FPS 与 60 分钟稳定性的正式实机测量（门禁方法沿用 D3 的累计

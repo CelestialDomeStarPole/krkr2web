@@ -1295,3 +1295,66 @@ TICK_EXCEPTION **1330→0**、进游戏 WebAudio start 连续推进至退出前 
 回标题 BGM 复活（标题剧本重载后新声源 play→EOF→自然收尾）、本轮连
 DRAIN_STALL 都未触发、退出依旧干净回库。对话窗进度条"冻结在随机位"的
 表观症状与风暴同源，随 0095 一并消除（投递节奏本身由 0093 修平）。
+
+### 2026-09-06 限速基准在全新 profile 上复活——首启屏只认触摸输入（bench 修复，非引擎改动）
+
+#### 背景：9-5 晚一轮失败中断的未提交会话
+
+为重开当前引擎（0095）的四项对话侧基线，前一会话在**全新审计 profile**
+（`E:\krkr2-audit-profile`）上重铺基准基建：`tools/d5_install_profile.js`
+（一键安装游戏内容）→ 跑 `tests/d5_throttled_bench.js`（标签 0096-r6）→
+失败（`newGame.started=false`、`voiceCount=0`、三张截图字节数全同——
+后者是已知的 `page.screenshot()` 陈旧合成帧问题，非新线索）→ 写
+`tools/d5_probe_start.js` 复查 → 重建引擎/重备产品（21:59）→ 中断，
+两个工具未提交、无文档。
+
+#### 逐项排除与定性（判别探针 `tools/d5_probe_input.js`）
+
+- **安装未完成？否**：install 探针复核 4,044,268,983/4,044,268,983
+  bytes 早在 9-5 21:41:47 已 ready/complete（bench 开跑前 4 分钟）。
+- **产品/引擎不一致？否**：产品 wasm=工作树 wasm（sha256 `2a21863e…`），
+  导出树 0095 符号在位（`TVPUnregisterAudioStream` 三处）；0094 插桩
+  字符串（WAVE_DRAIN_STALL/DIAG_STAGE/SB_STATUS）在出货二进制中可见。
+- **启动链路？正常**：`d5_probe_start.js` 显示 7s ready、rafAlive、无
+  fatal——真正卡点在 engineLog：游戏停在 `custom.ks → *logo → *caution`
+  （8.3MB `attention_cn.png` 刚加载）——**全新 profile 的首 boot 流**
+  （logo→caution→langselect→标题菜单），暖 profile 直接进标题菜单，
+  8-24 全部成功轮从未走过这些屏。
+- **决定性实验**（hasTouch 上下文，engineLog LABEL/SCENARIO 标记判定）：
+  鼠标点击×3 仅从 `*caution` 挪一步即卡死 `*logo`；**触摸点按×3 直达
+  `title_cn.pimg + langselect + title.ks *wait`（真标题）**；再 tap
+  (155,231) → `*title_game → *game → start.ks` 新游戏启动、语音在播
+  （audio starts=106）。与 8-26 探针方法论结论一致：**游戏内 UI 只认
+  触摸事件，纯鼠标事件不可靠**；8-24 暖 profile 轮用鼠标"能跑"纯属
+  没遇到首启屏的侥幸。bench 全程 `page.mouse.click` 且无 `hasTouch`，
+  是 0096 失败的唯一根因。
+
+#### 修复（tests/d5_throttled_bench.js，纯测试层）
+
+1. 上下文加 `hasTouch: true`；全部画布内交互 mouse.click →
+   `touchscreen.tap`（新游戏、对话推进、读档路径一并）。
+2. boot 门控从"predictionLog 出现 title 文件名"（弱信号，失败轮被
+   非 title.ks 的 title* 资产误触发）改为 engineLog 标记对
+   `SCENARIO title.ks` + `LABEL *wait`；等待期间中心 tap 跳过首启屏
+   （暖 profile 已在 *wait，tap 为无害空操作——probe_local_exit 同款
+   手法）。
+3. newGameStarted 判据增加 engineLog `SCENARIO start.ks` 权威信号
+   （保留 opens>+6 兼容）。
+
+#### 验证（同规格重跑，label 0096b-r6，rate=6 / 30 轮）
+
+`newGame.started=true`、`voiceCount=8`（p50 语音起播 740ms）、
+`spriteSwitchRounds=2`、boot-to-title 60.9s（含首启跳屏）、
+boot stallMax 7.7s（一次性载入类，与已知口径一致）。截图仍为陈旧帧
+（既有问题，判定一律走遥测）。**本轮是修复性重基线（单轮），不是
+性能对照**；后续对照需同规格成对跑。
+
+#### 交付物
+
+- `tools/d5_install_profile.js`（审计 profile 一键安装，幂等）
+- `tools/d5_probe_start.js`（启动链路状态探针）
+- `tools/d5_probe_input.js`（输入通道判别探针，本轮方法论核心）
+- `tests/d5_throttled_bench.js` 触摸化修复
+
+下一步（承接验收项 1）：基于修好的 bench 铺 60 分钟稳定性测量的
+本机长跑脚本，然后按 AGENTS.md 起热点 443 真机跑正式测量。

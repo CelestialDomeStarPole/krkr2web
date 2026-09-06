@@ -19,6 +19,14 @@
 //
 // The persistent profile already holds the installed senren-banka content;
 // never run two instances against the same profile.
+//
+// Input contract (learned 2026-09-06, see tools/d5_probe_input.js): in-game
+// UI only advances on touch events — mouse clicks stall on the first-boot
+// screens (custom.ks *logo/*caution) and must never be used inside the
+// canvas. The context therefore launches with hasTouch and every in-canvas
+// interaction goes through page.touchscreen.tap. Fresh profiles additionally
+// walk logo -> caution -> langselect before the title menu; bootPhase gate is
+// the engineLog marker pair SCENARIO title.ks + LABEL *wait.
 
 const fs = require("fs");
 const path = require("path");
@@ -48,6 +56,7 @@ async function main() {
     headless: true, executablePath,
     args: ["--autoplay-policy=no-user-gesture-required", "--ignore-certificate-errors"],
     viewport: { width: 1280, height: 720 },
+    hasTouch: true,
     ignoreHTTPSErrors: true,
     serviceWorkers: "block"
   });
@@ -128,26 +137,35 @@ async function main() {
       };
     });
 
-    for (var t = 0; t < 60; t += 1) {
+    const rect = await page.evaluate(function () {
+      var r = document.getElementById("canvas").getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    });
+    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+
+    // Boot gate: the title menu is up only when the engine reached title.ks
+    // *wait. Fresh profiles sit behind first-boot screens (logo/caution/
+    // langselect) that advance on center taps; warm profiles are already at
+    // *wait and the taps are no-ops there.
+    for (var t = 0; t < 120; t += 1) {
       const up = await page.evaluate(function () {
-        return (window.__predictionLog || []).some(function (e) {
-          return e.name.indexOf("title") !== -1;
-        });
+        var el = window.d4PlayerState().engineLog || [];
+        var seenTitle = false;
+        for (var i = 0; i < el.length; i += 1) {
+          if (el[i].indexOf("SCENARIO title.ks") !== -1) { seenTitle = true; }
+          if (seenTitle && el[i].indexOf("LABEL *wait") !== -1) { return true; }
+        }
+        return false;
       });
       if (up) { break; }
-      await page.waitForTimeout(2000);
+      await page.touchscreen.tap(cx, cy).catch(function () {});
+      await page.waitForTimeout(1500);
     }
     report.phases.boot = await collectPhase(page, {
       name: "boot-to-title", t0: bootT0, t1: Date.now()
     });
     await shot("title.png");
     await page.waitForTimeout(4000);
-
-    const rect = await page.evaluate(function () {
-      var r = document.getElementById("canvas").getBoundingClientRect();
-      return { x: r.x, y: r.y, w: r.width, h: r.height };
-    });
-    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
 
     // ---------- new game via title 新游戏 (benchmarks that way; save-load
     // path clicks 155,231+52 / slot and never reaches a voiced scene, so
@@ -158,15 +176,21 @@ async function main() {
     const opensBeforeNewGame = await page.evaluate(function () {
       return (window.__predictionLog || []).length;
     });
-    await page.mouse.click(rect.x + 155, rect.y + 231);
+    await page.touchscreen.tap(rect.x + 155, rect.y + 231);
     await page.waitForTimeout(3200);
     let newGameStarted = false;
     for (var w = 0; w < 18 && !newGameStarted; w += 1) {
-      const opens = await page.evaluate(function () {
-        return (window.__predictionLog || []).length;
-      });
-      if (opens > opensBeforeNewGame + 6) { newGameStarted = true; break; }
-      await page.mouse.click(cx, cy).catch(function () {});
+      const check = await page.evaluate(function (base) {
+        var opens = (window.__predictionLog || []).length;
+        var el = window.d4PlayerState().engineLog || [];
+        var started = false;
+        for (var i = 0; i < el.length; i += 1) {
+          if (el[i].indexOf("SCENARIO start.ks") !== -1) { started = true; break; }
+        }
+        return { opens: opens, started: started };
+      }, opensBeforeNewGame);
+      if (check.started || check.opens > opensBeforeNewGame + 6) { newGameStarted = true; break; }
+      await page.touchscreen.tap(cx, cy).catch(function () {});
       await page.waitForTimeout(1200);
     }
     await shot("after-newgame.png");
@@ -199,14 +223,14 @@ async function loadViaContinueMenu(page, rect, shot) {
   await page.evaluate(function () {
     window.__bench.clicks.push({ t: performance.now(), kind: "load-menu" });
   });
-  await page.mouse.click(rect.x + 155, rect.y + 231 + 52);
+    await page.touchscreen.tap(rect.x + 155, rect.y + 231 + 52);
   await page.waitForTimeout(2500);
   await shot("load-menu.png");
   // slot list: first slot row is near the top of the panel; click center-left
   await page.evaluate(function () {
     window.__bench.clicks.push({ t: performance.now(), kind: "load-slot" });
   });
-  await page.mouse.click(rect.x + rect.w / 2, rect.y + 150);
+  await page.touchscreen.tap(rect.x + rect.w / 2, rect.y + 150);
   await page.waitForTimeout(1200);
   await shot("load-slot-clicked.png");
   // wait until frame cadence recovers: 4 consecutive rAF gaps < 100 ms
@@ -255,7 +279,7 @@ async function dialogueLeg(page, cx, cy, shot, dialogueMarkT) {
       window.__bench.clicks.push({ t: performance.now(), kind: "dlg" });
     });
     const clickT = await page.evaluate(function () { return performance.now(); });
-    await page.mouse.click(cx, cy).catch(function () {});
+    await page.touchscreen.tap(cx, cy).catch(function () {});
     await page.waitForTimeout(700);
     const stat = await page.evaluate(function (arg) {
       var b = window.__bench;
