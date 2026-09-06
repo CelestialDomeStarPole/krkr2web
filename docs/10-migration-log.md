@@ -1356,5 +1356,52 @@ boot stallMax 7.7s（一次性载入类，与已知口径一致）。截图仍�
 - `tools/d5_probe_input.js`（输入通道判别探针，本轮方法论核心）
 - `tests/d5_throttled_bench.js` 触摸化修复
 
-下一步（承接验收项 1）：基于修好的 bench 铺 60 分钟稳定性测量的
-本机长跑脚本，然后按 AGENTS.md 起热点 443 真机跑正式测量。
+### 2026-09-06（第二轮）60 分钟稳定性长跑基建 + 本机正式长跑全绿（验收项 1 前置）
+
+#### 工具：`tools/d5_stability_soak.js`
+
+验收项 1（典型剧情 20 FPS 与 60 分钟稳定性）的本机前置。口径沿用 D3
+门禁（页面可见 + 心跳正常 + 事件循环停顿 <5s），叠加 D5 专项健康信号，
+全部来自遥测、零截屏依赖：
+
+- **门禁项**：全程 visibility=visible；rafAlive 恒真且 rafSilentMs<5000；
+  rAF 间隙 ≥5s 计数为 0；零 crashed/fatal/forcedStop/stopReason；零
+  TICK_EXCEPTION（engineLog 环形 + errors 双通道计数）；引擎节奏
+  PERF ticks/5s p05 ≥50（≥10fps 底线）。
+- **观测项**：PERF 窗口分布（ticks/avg/max/slow50/heap_mb，每 5s 一行）、
+  wasm 堆水位与 sbrk 增量、storage 图形缓存（cacheN/MB）、WebAudio
+  start 计数（声音存活代理，0095 胜利指标）、opens 计数（玩法推进代理，
+  notifyOpen 包装不封顶）、saveSyncCount、场景卡死兜底（opens 停涨
+  180s → 安全带位轮流 tap，避开 quickmenu 区）。
+- 输入契约与 bench 修复一致（hasTouch + touchscreen.tap + 首启跳屏）；
+  非限速——稳定性口径，性能 A/B 属 bench 职责。
+- 报告落 `build/d5-soak/<label>.json`，每 30s 一个采样点 + 终局门禁
+  判定 JSON；exit code 2=门禁失败。
+
+#### 本机结果（soak-60min-local，桌面 Chrome、非限速、tap 间隔 3s）
+
+**门禁全绿（120 采样点 / 3600s）**：
+
+- 心跳：rafSilentMax **141ms**、rAF 最大间隙 **2012ms**、>250ms 间隙
+  仅 6 次、**>2.5s 间隙 0 次**——"停顿<5s"口径大幅富余。
+- 节奏：1426 个 PERF 窗口，ticks/5s **p50=97 / p95=102 / p05=85**
+  （min 42 单窗、max 134 为门控追带突发）→ 中位 ≈19.4fps，贴住
+  20fps 设计门控；slow50 合计 75.8s（占墙钟 2.1%）、单 tick 最大
+  2339ms。
+- 内存：堆 243→882MB 随场景内容爬升后**平台化**（828MB@t+2233 起、
+  882MB@t+2867 起至结束不再增长）；wasm 水位 978MB（上限 1.5GiB）；
+  图形缓存 256MB/182 项满额稳定。
+- 音频：全程 **95,886 次** WebAudio start（≈26.6/s，流式分段节奏），
+  声音整轮存活。
+- 玩法：opens 68→3536 持续推进、saveSync 每采样点同步（120 次）、
+  1 次卡死兜底（t+543s，自愈恢复；疑为无语音文本段的 opens 盲区，
+  非引擎卡死——兜底前后节奏不变可证）。
+
+#### 判读与下一步
+
+- 本机（桌面级算力、非限速）稳定性成立：无泄漏趋势、无事件循环
+  停摆、无 tick 异常、声音存活。**不等于实机结论**——正式测量需
+  TB-X802F 真机跑 60 分钟后上传诊断报告（报告自带完整 player 快照：
+  engineLog 含全部 PERF 行、心跳、帧门控、存储/预取/音频指标，
+  60 分钟 PERF 行 ≈720 行在 2000 行环形缓冲内），判据同上。
+- 验收项 1 状态：本机前置通过，实机正式测量待做（见 09 验证记录）。
