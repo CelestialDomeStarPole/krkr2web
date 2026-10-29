@@ -1,0 +1,112 @@
+name: Build Engine (krkrsdl2 + patches)
+
+# 目的：在云端（GitHub Actions, windows-latest）产出 krkr2web 的引擎产物
+#   build/d3-engine/krkrsdl2.js
+#   build/d3-engine/krkrsdl2.wasm
+#   build/d3-engine/webp-worker.js / webp-worker.wasm
+# 本地不需要装 emsdk / cmake / ninja。
+#
+# 触发：Actions -> "Build Engine (krkrsdl2 + patches)" -> Run workflow
+#
+# 说明（为什么这些步骤是必需的）：
+#   1) tools/build_d3.ps1 依赖 .toolchains/d3-build-tools/Scripts/{cmake,ninja}.exe，
+#      该目录不在仓库里（作者本机环境）。这里用 pip 版 cmake/ninja 复现同样的布局。
+#   2) engine/upstream.json 锁定了 4 个上游仓库的提交，源码检出必须放在
+#      参考资料/开源项目/<name>（该目录被 .gitignore 忽略，所以要在 CI 里拉）。
+#   3) tools/setup_d0_toolchain.ps1 会拉 emsdk 并激活 Emscripten 3.1.64。
+#   4) tools/build_d3.ps1 需要
+#      参考资料/开源项目/kirikiroid2-web/ui/cocos-studio/DroidSansFallback.ttf(+LICENSE)。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-engine:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Provision build tools (cmake/ninja as pip packages)
+        shell: pwsh
+        run: |
+          python -m venv .toolchains/d3-build-tools
+          $py = ".\.toolchains\d3-build-tools\Scripts\python.exe"
+          & $py -m pip install --upgrade pip
+          & $py -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
+          if (-not (Test-Path ".\.toolchains\d3-build-tools\Scripts\cmake.exe")) { throw "cmake.exe missing" }
+          if (-not (Test-Path ".\.toolchains\d3-build-tools\Scripts\ninja.exe")) { throw "ninja.exe missing" }
+          Write-Host "build tools ready"
+
+      - name: Fetch locked upstream checkouts
+        shell: pwsh
+        run: |
+          $base = "参考资料/开源项目"
+          New-Item -ItemType Directory -Force -Path $base | Out-Null
+          $repos = @(
+            @{ n = "krkrsdl2";        u = "https://github.com/krkrsdl2/krkrsdl2.git";          s = "3f384a6869f6726929c777bdd0e0c871d5d5383d" },
+            @{ n = "krkr2";           u = "https://github.com/2468785842/krkr2.git";            s = "dca7264572a63e753c1b07ca7053513d1751ce70" },
+            @{ n = "csvParser";       u = "https://github.com/wtnbgo/csvParser.git";            s = "7c757cf4c98e0ad314a8bdcd1d78751da6045bbe" },
+            @{ n = "kirikiroid2-web"; u = "https://github.com/fenghengzhi/kirikiroid2-web.git"; s = "338d2029f16969b84becfd163c67f99740e28296" }
+          )
+          foreach ($r in $repos) {
+            $dst = Join-Path $base $r.n
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            Push-Location $dst
+            git init -q
+            git remote add origin $r.u
+            $ok = $false
+            for ($i = 1; $i -le 4; $i++) {
+              git fetch --depth 1 origin $r.s
+              if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+              Write-Host "retry $($r.n) ($i/4)"
+              Start-Sleep -Seconds 5
+            }
+            if (-not $ok) { throw "git fetch failed: $($r.n)" }
+            git checkout -q FETCH_HEAD
+            Pop-Location
+            Write-Host "ok $($r.n)"
+          }
+
+          $font = Join-Path $base "kirikiroid2-web/ui/cocos-studio/DroidSansFallback.ttf"
+          if (-not (Test-Path $font)) { throw "probe font missing: $font" }
+          Write-Host "probe font ok"
+
+      - name: Install locked Emscripten 3.1.64
+        shell: pwsh
+        run: .\tools\setup_d0_toolchain.ps1
+
+      - name: Build engine (D3)
+        shell: pwsh
+        run: .\tools\build_d3.ps1
+
+      - name: Show engine output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "build/d3-engine")) { throw "build/d3-engine missing" }
+          Get-ChildItem build/d3-engine | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Upload engine artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d3-engine
+          path: build/d3-engine
+          if-no-files-found: error
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build/**
+            .toolchains/**
+          if-no-files-found: warn
+          retention-days: 7
