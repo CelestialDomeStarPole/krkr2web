@@ -94,6 +94,38 @@ jobs:
           if (-not (Test-Path $font)) { throw "probe font missing: $font" }
           Write-Host "probe font ok"
 
+      - name: Fetch libwebp (WebP decoder sources)
+        shell: pwsh
+        run: |
+          # build_d3.ps1:213 需要 参考资料/开源项目/libwebp/src，
+          # 缺失时它是 `if (Test-Path ...)` 静默跳过，然后 CMake 才报
+          # "Cannot find source file: external/webp/src/dec/alpha_dec.c"。
+          # 其它游戏的图像多为 WebP 伪装成 .png/.tlg，这个解码器是必需的。
+          $base = "参考资料/开源项目"
+          $dst  = Join-Path $base "libwebp"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          if (-not (Test-Path (Join-Path $dst "src"))) {
+            Push-Location $dst
+            git init -q
+            git remote add origin https://github.com/webmproject/libwebp.git
+            $ok = $false
+            foreach ($ref in @("v1.4.0", "v1.3.2", "main")) {
+              for ($i = 1; $i -le 3; $i++) {
+                git fetch -q --depth 1 origin $ref
+                if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+                Start-Sleep -Seconds 5
+              }
+              if ($ok) { Write-Host "libwebp ref=$ref"; break }
+            }
+            if (-not $ok) { throw "cannot fetch libwebp" }
+            git checkout -q FETCH_HEAD
+            Pop-Location
+          }
+          foreach ($f in @("src/dec/alpha_dec.c", "src/dsp/dec.c", "src/utils/utils.c", "src/webp/decode.h")) {
+            if (-not (Test-Path (Join-Path $dst $f))) { throw "libwebp missing $f" }
+          }
+          Write-Host "libwebp ok"
+
       - name: Install locked Emscripten 3.1.64
         shell: pwsh
         run: .\tools\setup_d0_toolchain.ps1
@@ -129,6 +161,8 @@ jobs:
             }
             $k = Join-Path $src "external/krkrz"
             Write-Host "== external/krkrz exists: $(Test-Path $k) files: $((Get-ChildItem $k -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count)"
+            $w = Join-Path $src "external/webp/src"
+            Write-Host "== external/webp/src exists: $(Test-Path $w) files: $((Get-ChildItem $w -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count)"
             Write-Host "== external/ listing =="
             Get-ChildItem (Join-Path $src "external") -ErrorAction SilentlyContinue | Select-Object Name | Format-Table -AutoSize
           }
