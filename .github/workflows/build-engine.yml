@@ -73,6 +73,19 @@ jobs:
             }
             if (-not $ok) { throw "git fetch failed: $($r.n)" }
             git checkout -q FETCH_HEAD
+            # 上游仓库带 git submodule（例如 krkrsdl2/external/krkrz）。
+            # build_d3.ps1:122 会校验子模块的提交号，不初始化就会直接 throw：
+            #   "Submodule ... is <sha>; expected <sha>"
+            if (Test-Path ".gitmodules") {
+              Write-Host "init submodules for $($r.n)"
+              # 先试浅取（SDL/FAudio 全历史很大），失败再回退全量。
+              git submodule update --init --recursive --depth 1
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "shallow submodule fetch failed, retrying full: $($r.n)"
+                git submodule update --init --recursive
+              }
+              if ($LASTEXITCODE -ne 0) { throw "submodule update failed: $($r.n)" }
+            }
             Pop-Location
             Write-Host "ok $($r.n)"
           }
