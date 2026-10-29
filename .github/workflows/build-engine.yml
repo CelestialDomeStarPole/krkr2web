@@ -23,7 +23,7 @@ on:
 jobs:
   build-engine:
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 300
     env:
       PYTHONIOENCODING: utf-8
 
@@ -40,7 +40,9 @@ jobs:
           python -m venv .toolchains/d3-build-tools
           $py = ".\.toolchains\d3-build-tools\Scripts\python.exe"
           & $py -m pip install --upgrade pip
-          & $py -m pip install "cmake==3.31.6" "ninja==1.11.1.4"
+          # 不钉版本：cmake/ninja 的 PyPI 轮子里并不总有对应版本，
+          # 钉死会在 “No matching distribution” 上直接挂掉。
+          & $py -m pip install cmake ninja
           if (-not (Test-Path ".\.toolchains\d3-build-tools\Scripts\cmake.exe")) { throw "cmake.exe missing" }
           if (-not (Test-Path ".\.toolchains\d3-build-tools\Scripts\ninja.exe")) { throw "ninja.exe missing" }
           Write-Host "build tools ready"
