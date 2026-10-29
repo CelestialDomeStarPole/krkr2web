@@ -100,7 +100,54 @@ jobs:
 
       - name: Build engine (D3)
         shell: pwsh
-        run: .\tools\build_d3.ps1
+        run: |
+          # 把脚本输出同时落到文件，失败时随 artifact 一起上传，方便定位。
+          try {
+            .\tools\build_d3.ps1 2>&1 | Tee-Object -FilePath build_d3.log
+          } catch {
+            Write-Host "::error::build_d3 failed: $_"
+            exit 1
+          }
+
+      - name: Diagnose build tree (on failure)
+        if: failure()
+        shell: pwsh
+        run: |
+          $work = "build/d3-engine-work"
+          $src  = Join-Path $work "source"
+          Write-Host "== $work =="
+          Get-ChildItem $work -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table -AutoSize
+          Write-Host "== source exists: $(Test-Path $src)"
+          if (Test-Path $src) {
+            Write-Host "== source top =="
+            Get-ChildItem $src | Select-Object Name | Format-Table -AutoSize
+            $f = Join-Path $src "src/config/src_list/kirikirisdl2/sources.txt"
+            Write-Host "== sources.txt exists: $(Test-Path $f)"
+            if (Test-Path $f) {
+              Write-Host "   lines=$((Get-Content -LiteralPath $f).Count) bytes=$((Get-Item -LiteralPath $f).Length)"
+              Get-Content -LiteralPath $f -TotalCount 3 | ForEach-Object { "   | $_" }
+            }
+            $k = Join-Path $src "external/krkrz"
+            Write-Host "== external/krkrz exists: $(Test-Path $k) files: $((Get-ChildItem $k -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count)"
+            Write-Host "== external/ listing =="
+            Get-ChildItem (Join-Path $src "external") -ErrorAction SilentlyContinue | Select-Object Name | Format-Table -AutoSize
+          }
+          $cml = Join-Path $src "CMakeLists.txt"
+          if (Test-Path $cml) {
+            Write-Host "== CMakeLists.txt 730-762 =="
+            $lines = Get-Content -LiteralPath $cml
+            for ($i = 729; $i -lt [Math]::Min(762, $lines.Count); $i++) { "{0}: {1}" -f ($i + 1), $lines[$i] }
+            Write-Host "== KRKRSDL2COMMON_SRC 写入点 =="
+            Select-String -Path $cml -Pattern "KRKRSDL2COMMON_SRC|target_sources" |
+              Select-Object -First 15 | ForEach-Object { "{0}: {1}" -f $_.LineNumber, $_.Line.Trim() }
+          }
+
+          $cache = Join-Path $work "cmake/CMakeCache.txt"
+          if (Test-Path $cache) {
+            Write-Host "== CMakeCache key vars =="
+            Select-String -Path $cache -Pattern "KRKRSDL2|CMAKE_SYSTEM_NAME|CMAKE_CXX_COMPILER:" |
+              Select-Object -First 12 | ForEach-Object { $_.Line }
+          }
 
       - name: Show engine output
         shell: pwsh
@@ -120,8 +167,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
+          # 不要把 .toolchains/** 传上去：emsdk + cmake 有 1GB+，会让 artifact 卡死。
           path: |
-            build/**
-            .toolchains/**
+            build_d3.log
+            build/d3-engine-work/cmake/CMakeCache.txt
+            build/d3-engine-work/cmake/CMakeFiles/CMakeError.log
+            build/d3-engine-work/cmake/CMakeFiles/CMakeOutput.log
           if-no-files-found: warn
           retention-days: 7
